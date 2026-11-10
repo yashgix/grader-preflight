@@ -1,6 +1,7 @@
 import unittest
 
-from preflight.tau2_adapter import DOMAINS, fresh_env, gold_calls, grade, run, tasks
+from preflight import tau2_adapter
+from preflight.tau2_adapter import DOMAINS, env_kwargs, fresh_env, gold_calls, grade, run, tasks
 
 
 def writes_db(domain, task):
@@ -30,6 +31,17 @@ class AdapterTest(unittest.TestCase):
         for domain in DOMAINS:
             task = next(t for t in tasks(domain) if writes_db(domain, t))
             self.assertEqual(grade(domain, task, []), 0.0, f"{domain} {task.id}")
+
+    def test_banking_gets_the_read_log_allowlist_tau2_runs_with(self):
+        task = next(t for t in tasks("banking_knowledge") if t.id == "task_043")
+        kwargs = env_kwargs("banking_knowledge", task)
+        if tau2_adapter._derive_read_log_allowlist is None:
+            self.assertNotIn("read_log_allowlist", kwargs)
+        else:
+            names = {
+                c.arguments["agent_tool_name"] for c in gold_calls(task) if c.name == "call_discoverable_agent_tool"
+            }
+            self.assertEqual(kwargs["read_log_allowlist"], names)
 
 
 if __name__ == "__main__":

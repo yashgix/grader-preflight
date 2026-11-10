@@ -164,3 +164,26 @@ basis. The same holds for any variant whose calls equal the gold calls.
   kept unchanged, and that part of H2 is now expected not to hold.
 - Also measured before any run, for the fixture rule of amendment 2: 62 of 88 banking tasks are comparable across
   versions (10 changed definitions, 16 more with different gold tool outputs), and all 50 airline and 114 retail tasks.
+
+### 4. Grade G_new as τ²-bench runs it; P1 can reach reads the gold run does not use (10 Nov 2026, before any relation run)
+
+New evidence, from the #329 fix itself (commit `ef592a7`) and from the first builds' review: v1.0.1 logs a
+discoverable read to the hashed `agent_discoverable_tools` table only when the read is on a per-task allowlist, the
+tools the gold run calls through `call_discoverable_agent_tool`. That allowlist is built by τ²-bench's runner
+(`tau2.runner.build._build_env_kwargs`) and passed in `env_kwargs`; `calculate_reward` does not build it. Two
+consequences for this protocol:
+
+- The adapter passed only the retrieval variant, so under G_new it logged no reads at all, a setting τ²-bench never
+  runs. It now passes the same allowlist, built by τ²-bench's own `_derive_read_log_allowlist(task)`, to the live
+  environment and to the grader, on every version that has the function (v1.0.1). G_old is unchanged.
+- The spec let P1 insert only discoverable reads the run had already unlocked. The gold run calls every tool it
+  unlocks, so every such variant repeats a gold read (`inserted_in_gold`), which both versions log once by tool
+  name, and #329 could never show. P1 may now also insert a discoverable read the run has not unlocked, with its
+  `unlock_discoverable_agent_tool` call right before it, which is how an agent calls it. Unlocking alone leaves the
+  agent and user DB hashes unchanged on the live environment (checked on both versions).
+- H1(a) compares like with like: P1 variants with `inserted_in_gold` are counted apart on both versions, not only
+  on G_new, as the original text ("counted apart") says.
+
+Disclosure: while finding this, task_043 was graded with one repeated gold read and with four base-toolkit reads
+inserted (all scored 1 on both versions, under the old adapter). No variant with an unlocked new read was graded.
+Rechecked after the change: the gold run still scores 1 on all 252 DB-graded tasks under both versions.

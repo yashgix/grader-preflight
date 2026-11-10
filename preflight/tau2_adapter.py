@@ -8,6 +8,11 @@ from tau2.environment.environment import Environment
 from tau2.evaluator.evaluator_env import EnvironmentEvaluator
 from tau2.registry import registry
 
+try:  # v1.0.1 builds banking's read-log allowlist (#329) in its runner, not in the grader
+    from tau2.runner.build import _derive_read_log_allowlist
+except ImportError:
+    _derive_read_log_allowlist = None
+
 DOMAINS = ("banking_knowledge", "airline", "retail")
 # The default banking variant embeds the knowledge base through a paid API; grep keeps it offline.
 ENV_KWARGS = {"banking_knowledge": {"retrieval_variant": "grep_only"}}
@@ -33,8 +38,16 @@ def gold_calls(task: Task) -> list[Call]:
     return [Call(a.name, dict(a.arguments), a.requestor) for a in task.evaluation_criteria.actions or []]
 
 
+def env_kwargs(domain: str, task: Task) -> dict:
+    """The environment arguments tau2's own runner uses for this task."""
+    kwargs = dict(ENV_KWARGS.get(domain, {}))
+    if domain == "banking_knowledge" and _derive_read_log_allowlist:
+        kwargs["read_log_allowlist"] = _derive_read_log_allowlist(task)
+    return kwargs
+
+
 def fresh_env(domain: str, task: Task) -> Environment:
-    env = registry.get_env_constructor(domain)(**ENV_KWARGS.get(domain, {}))
+    env = registry.get_env_constructor(domain)(**env_kwargs(domain, task))
     init = task.initial_state
     env.set_state(
         initialization_data=init.initialization_data if init else None,
@@ -60,5 +73,5 @@ def grade(domain: str, task: Task, calls: list[Call]) -> float:
     messages, _ = run(domain, task, calls)
     constructor = registry.get_env_constructor(domain)
     return EnvironmentEvaluator.calculate_reward(
-        constructor, task, messages, env_kwargs=ENV_KWARGS.get(domain, {})
+        constructor, task, messages, env_kwargs=env_kwargs(domain, task)
     ).reward
