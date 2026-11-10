@@ -153,7 +153,8 @@ rewards as the baseline); the pre-registered retail-only tuning check belongs to
 ## Phase 2: learner and grading
 
 - Softmax over the features, REINFORCE with a running-mean baseline, undiscounted: every action of an episode gets the
-  episode's return, so nothing but the grader penalizes a lookup.
+  episode's return, so no step cost or discount penalizes a lookup. Extra lookups do use up horizon steps, equally
+  in every condition.
 - The smoke runs 2,000 training episodes per condition and seed, with tasks drawn uniformly from the five smoke train
   tasks. The later full sweep uses 3,000 episodes; this build does not.
 - One grader call per distinct final trajectory, memoized inside the run's process: the key is the task id, the task
