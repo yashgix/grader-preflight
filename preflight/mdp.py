@@ -191,7 +191,8 @@ def _altered_call(call: Call, name: str, alternative: str, location: str) -> Cal
 
 
 def _altered_actions(domain: str, task, gold: list[Call], kinds: list[str]) -> list[Action]:
-    """At most two altered copies of each gold write, each swapping one string `_id` argument."""
+    """At most two altered copies of each gold write, each swapping one string `_id` argument and equal to no gold
+    call."""
     task_values = _values_by_name(gold)
     actions = []
     for index, call in enumerate(gold):
@@ -205,6 +206,8 @@ def _altered_actions(domain: str, task, gold: list[Call], kinds: list[str]) -> l
             if alternative is None:
                 continue
             altered = _altered_call(call, name, alternative, location)
+            if altered in gold:  # the swap reproduced another gold call, so nothing is altered
+                continue
             actions.append(Action("altered", (altered,), index))
             made += 1
     return actions

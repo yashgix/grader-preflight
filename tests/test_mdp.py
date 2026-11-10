@@ -247,6 +247,19 @@ class MdpTest(unittest.TestCase):
         ):
             self.assertTrue(order_ok(task, [read, verification, write]))
 
+    def test_an_altered_copy_equal_to_a_gold_call_is_not_offered(self):
+        task = mock.Mock(id="t3")
+        gold = [Call("close_account", {"account_id": "A1"}), Call("close_account", {"account_id": "A2"})]
+        with (
+            mock.patch("preflight.mdp.gold_calls", return_value=gold),
+            mock.patch("preflight.mdp.fresh_env", return_value=object()),
+            mock.patch("preflight.mdp.tool_kind", return_value="write"),
+            mock.patch("preflight.mdp._p1_plans", return_value=[]),
+        ):
+            actions = task_actions("banking_knowledge", task)
+
+        self.assertFalse([action for action in actions if action.kind == "altered" and action.calls[0] in gold])
+
     def test_altered_copy_of_a_wrapper_write_changes_one_inner_id(self):
         task = mock.Mock(id="wrapper-write")
         inner = {"account_id": "A1", "amount": 25, "note": "keep"}
