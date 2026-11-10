@@ -412,6 +412,18 @@ class P3Test(unittest.TestCase):
         self.assertIn("25.0", respelled)
         self.assertIn('"25"', respelled)
 
+    def test_a_direct_tools_arguments_string_is_not_respelled(self):
+        arguments = json.dumps({"amount": 25, "note": "25"}, sort_keys=True)
+        gold = [Call("direct_tool", {"account_id": "A1", "arguments": arguments, "amount": 25})]
+        with mock.patch("preflight.relations.gold_calls", return_value=gold):
+            variants = p3_respelled_numbers("banking_knowledge", object(), random.Random(0))
+
+        self.assertEqual(len(variants), 1)
+        self.assertTrue(variants[0].expected_pass)
+        respelled = variants[0].calls[0].arguments
+        self.assertEqual(respelled["arguments"], arguments)
+        self.assertEqual(respelled["amount"], 25.0)
+
 
 class P5Test(unittest.TestCase):
     @classmethod

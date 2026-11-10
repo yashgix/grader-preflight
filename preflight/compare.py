@@ -367,13 +367,20 @@ def _h1_line(label, data):
     old_names = _names(data['old_flag_tasks'])
     new_names = _names(data['new_flag_tasks'])
     diff_sets = _format_db_diff_sets(data['db_diff_counts'])
+    paired = data['paired']
+    old_flags = len(data['old_flag_tasks'])
+    new_flags = len(data['new_flag_tasks'])
+    unpaired = len(data['unpaired'])
+    old_errors = data['old_errors']
+    new_errors = data['new_errors']
+    fingerprint_diff = data['fp_diff']
     return (
-        f'{label}: {held} - paired verdicts: {data["paired"]}; '
-        f'OLD flagged pairs: {len(data["old_flag_tasks"])} ({old_names}); '
-        f'NEW flagged pairs: {len(data["new_flag_tasks"])} ({new_names}); '
-        f'unpaired comparable: {len(data["unpaired"])}; '
-        f'OLD errors: {data["old_errors"]}; NEW errors: {data["new_errors"]}; '
-        f'output_fingerprints differ: {data["fp_diff"]}; '
+        f'{label}: {held} - paired verdicts: {paired}; '
+        f'OLD flagged pairs: {old_flags} ({old_names}); '
+        f'NEW flagged pairs: {new_flags} ({new_names}); '
+        f'unpaired comparable: {unpaired}; '
+        f'OLD errors: {old_errors}; NEW errors: {new_errors}; '
+        f'output_fingerprints differ: {fingerprint_diff}; '
         f'OLD db_diff sets: {diff_sets}.'
     )
 
@@ -382,16 +389,31 @@ def _h2_line(h2):
     held = 'held' if h2['held'] else 'not held'
     f3_part = 'part held' if h2['f3_held'] else 'part not held'
     f6_part = 'part held' if h2['f6_held'] else 'part not held'
+    f3_rate = h2['f3_rate']
+    f3_passes = h2['f3_passes']
+    f3_verdicts = h2['f3_verdicts']
+    f3_errors = h2['f3_errors']
+    f1_tasks = h2['f1_tasks']
+    f1_verdicts = h2['f1_verdicts']
+    f1_errors = h2['f1_errors']
+    f6_share = h2['f6_share']
+    f6_passes = h2['f6_passes']
+    f6_verdict_tasks = h2['f6_verdict_tasks']
+    f6_attempted_tasks = h2['f6_attempted_tasks']
+    f6_errors = h2['f6_errors']
+    f6_error_tasks = h2['f6_error_tasks']
+    p_flags = h2['p_flags']
+    p_errors = h2['p_errors']
     return (
-        f'H2: {held} - F3 pass rate NEW: {h2["f3_rate"]:.4f} '
-        f'({h2["f3_passes"]}/{h2["f3_verdicts"]}; {h2["f3_errors"]} errors; {f3_part}); '
-        f'F1 airline passing tasks NEW: {h2["f1_tasks"]} '
-        f'({h2["f1_verdicts"]} verdicts, {h2["f1_errors"]} errors); '
-        f'F6 banking pass share NEW: {h2["f6_share"]:.4f} '
-        f'({h2["f6_passes"]}/{h2["f6_verdict_tasks"]} tasks with a verdict; '
-        f'{h2["f6_attempted_tasks"]} attempted; {h2["f6_errors"]} errors on {h2["f6_error_tasks"]} tasks; '
+        f'H2: {held} - F3 pass rate NEW: {f3_rate:.4f} '
+        f'({f3_passes}/{f3_verdicts}; {f3_errors} errors; {f3_part}); '
+        f'F1 airline passing tasks NEW: {f1_tasks} '
+        f'({f1_verdicts} verdicts, {f1_errors} errors); '
+        f'F6 banking pass share NEW: {f6_share:.4f} '
+        f'({f6_passes}/{f6_verdict_tasks} tasks with a verdict; '
+        f'{f6_attempted_tasks} attempted; {f6_errors} errors on {f6_error_tasks} tasks; '
         f'{f6_part}); '
-        f'P-relation flagged variants NEW: {h2["p_flags"]} ({h2["p_errors"]} errors).'
+        f'P-relation flagged variants NEW: {p_flags} ({p_errors} errors).'
     )
 
 
@@ -415,10 +437,10 @@ def _control_mismatches(old_tasks, new_tasks, changed, pairs, unpaired):
                 continue
             variant = item['variant']
             detail = variant.get('detail')
-            mismatches.append(
-                f'{domain}/{variant.get("task_id")} {variant.get("relation")} '
-                f'{detail!r}: unpaired on {item["side"]}'
-            )
+            task_id = variant.get('task_id')
+            relation = variant.get('relation')
+            side = item['side']
+            mismatches.append(f'{domain}/{task_id} {relation} {detail!r}: unpaired on {side}')
         for pair in pairs:
             if pair['domain'] != domain:
                 continue
@@ -427,9 +449,11 @@ def _control_mismatches(old_tasks, new_tasks, changed, pairs, unpaired):
             if old.get('outcome') != new.get('outcome') or old.get('reward') != new.get('reward'):
                 old_pair = (old.get('outcome'), old.get('reward'))
                 new_pair = (new.get('outcome'), new.get('reward'))
+                task_id = old.get('task_id')
+                relation = old.get('relation')
+                detail = old.get('detail')
                 mismatches.append(
-                    f'{domain}/{old.get("task_id")} {old.get("relation")} '
-                    f'{old.get("detail")!r}: old={old_pair} new={new_pair}'
+                    f'{domain}/{task_id} {relation} {detail!r}: old={old_pair} new={new_pair}'
                 )
     return mismatches
 
@@ -481,8 +505,6 @@ def compare(old_dir, new_dir, out_path):
     one_sided = _one_sided_tasks(old_tasks, new_tasks)
     comparable = {key for key in set(old_tasks) & set(new_tasks) if key not in changed}
     pairs, unpaired = _pair_variants(old_files, new_files, comparable)
-
-    old_all = list(_variants(old_files))
     new_all = list(_variants(new_files))
 
     old_p1_all = _without_changed(_flagged(old_p1_rows, BANK, IN_GOLD), BANK, changed) | _without_changed(
@@ -500,10 +522,22 @@ def compare(old_dir, new_dir, out_path):
     h2 = _h2(new_all)
     mismatches = _control_mismatches(old_tasks, new_tasks, changed, pairs, unpaired)
     control_passed = not mismatches
+    control_text = 'passed' if control_passed else 'failed'
     f1_old = _f1_split(old_files, old_tasks)
     f1_new = _f1_split(new_files, new_tasks)
     static_old = _static_counts(old_files)
     static_new = _static_counts(new_files)
+    old_only_flags = [
+        pair
+        for pair in pairs
+        if pair['old'].get('outcome') == 'verdict'
+        and pair['old'].get('flagged') is True
+        and pair['new'].get('outcome') == 'verdict'
+        and pair['new'].get('flagged') is not True
+    ]
+    old_only_flags.sort(
+        key=lambda pair: (str(pair['domain']), str(pair['task_id']), str(pair['relation']), str(pair['detail']))
+    )
 
     lines = [
         '# Preflight comparison',
@@ -518,7 +552,8 @@ def compare(old_dir, new_dir, out_path):
         for (domain, task_id), parts in sorted(
             changed.items(), key=lambda item: (str(item[0][0]), str(item[0][1]))
         ):
-            lines.append(f'- {domain}/{task_id}: {", ".join(parts)}')
+            joined = ', '.join(parts)
+            lines.append(f'- {domain}/{task_id}: {joined}')
     else:
         lines.append('None.')
 
@@ -536,10 +571,11 @@ def compare(old_dir, new_dir, out_path):
         for item in unpaired:
             variant = item['variant']
             detail = variant.get('detail')
-            lines.append(
-                f'- {item["side"]} {item["domain"]}/{variant.get("task_id")} '
-                f'{variant.get("relation")} {detail!r}'
-            )
+            side = item['side']
+            domain = item['domain']
+            task_id = variant.get('task_id')
+            relation = variant.get('relation')
+            lines.append(f'- {side} {domain}/{task_id} {relation} {detail!r}')
     else:
         lines.append('None.')
 
@@ -561,21 +597,14 @@ def compare(old_dir, new_dir, out_path):
     lines += _relation_table('old', old_p1_rows)
     lines += _relation_table('new', new_p1_rows)
 
-    old_flags = {
-        (domain, variant.get('task_id'), variant.get('relation'))
-        for domain, variant in old_all
-        if variant.get('outcome') == 'verdict' and variant.get('flagged') is True
-    }
-    new_flags = {
-        (domain, variant.get('task_id'), variant.get('relation'))
-        for domain, variant in new_all
-        if variant.get('outcome') == 'verdict' and variant.get('flagged') is True
-    }
-    missing_flags = sorted(old_flags - new_flags, key=lambda item: tuple(str(part) for part in item))
     lines += ['', '## Flags on OLD and absent on NEW', '']
-    if missing_flags:
-        for domain, task_id, relation in missing_flags:
-            lines.append(f'- {domain}/{task_id} {relation}')
+    if old_only_flags:
+        for pair in old_only_flags:
+            domain = pair['domain']
+            task_id = pair['task_id']
+            relation = pair['relation']
+            detail = pair['detail']
+            lines.append(f'- {domain}/{task_id} {relation} {detail!r}')
     else:
         lines.append('None.')
 
@@ -584,7 +613,7 @@ def compare(old_dir, new_dir, out_path):
     lines.append(_h1_line('H1(b)', h1b))
     lines.append(_h2_line(h2))
 
-    lines += ['', '## Control', '', f'Control: {"passed" if control_passed else "failed"}']
+    lines += ['', '## Control', '', f'Control: {control_text}']
     lines.append(f'Mismatches: {len(mismatches)}.')
     for mismatch in mismatches:
         lines.append(f'- {mismatch}')
@@ -594,12 +623,17 @@ def compare(old_dir, new_dir, out_path):
         if not split:
             lines.append(f'- {side}: no F1 variants')
         for (domain, bucket), row in _sorted_f1(split):
+            attempted = row['attempted']
+            verdicts = row['verdicts']
+            errors = row['errors']
+            passed_variants = row['passed_variants']
+            passed_tasks = len(row['passed_tasks'])
             parts = [
-                f'attempted={row["attempted"]}',
-                f'verdicts={row["verdicts"]}',
-                f'errors={row["errors"]}',
-                f'passed_variants={row["passed_variants"]}',
-                f'passed_tasks={len(row["passed_tasks"])}',
+                f'attempted={attempted}',
+                f'verdicts={verdicts}',
+                f'errors={errors}',
+                f'passed_variants={passed_variants}',
+                f'passed_tasks={passed_tasks}',
             ]
             lines.append(f'- {side} {domain} gold_changes_db={F1_LABELS[bucket]}: ' + ' '.join(parts))
 
@@ -635,7 +669,10 @@ def compare(old_dir, new_dir, out_path):
         if not files:
             lines.append(f'- {side}: no JSON files')
         for data in sorted(files, key=lambda item: (str(item.get('domain')), item.get('_file', ''))):
-            lines.append(f'- {side} {data.get("domain")}/{data.get("_file")}: {data.get("records_sha256")}')
+            domain = data.get('domain')
+            file_name = data.get('_file')
+            digest = data.get('records_sha256')
+            lines.append(f'- {side} {domain}/{file_name}: {digest}')
 
     metrics = {
         'h1a_held': int(h1a['held']),

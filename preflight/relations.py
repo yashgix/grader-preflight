@@ -13,10 +13,12 @@ from preflight.tau2_adapter import Call, fresh_env, gold_calls, run
 
 AGENT_WRAPPER = "call_discoverable_agent_tool"
 USER_WRAPPER = "call_discoverable_user_tool"
+GIVE_USER_TOOL = "give_discoverable_user_tool"
 NAME_KEY = {AGENT_WRAPPER: "agent_tool_name", USER_WRAPPER: "discoverable_tool_name"}
 UNLOCK_AGENT = "unlock_discoverable_agent_tool"
 UNLOCK_USER = "unlock_discoverable_user_tool"
 UNLOCK_KEY = {UNLOCK_AGENT: "agent_tool_name", UNLOCK_USER: "discoverable_tool_name"}
+WRAPPER_ARGUMENTS = frozenset({AGENT_WRAPPER, USER_WRAPPER, GIVE_USER_TOOL})
 READ = "read"
 WRITE = "write"
 KINDS = {"read", "write", "generic", "think"}
@@ -407,7 +409,7 @@ def _respell_call(call: Call) -> Call:
         return call
     arguments = {}
     for name, value in call.arguments.items():
-        if name == "arguments" and isinstance(value, str):
+        if name == "arguments" and call.name in WRAPPER_ARGUMENTS and isinstance(value, str):
             arguments[name] = _respell_json(value)
         else:
             arguments[name] = _respell(value)

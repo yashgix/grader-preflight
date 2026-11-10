@@ -29,7 +29,7 @@ environment and to the grader, so banking is graded in the configuration τ²-be
 | Id | Change to the gold run | Expected verdict |
 | --- | --- | --- |
 | P1 | insert one call to a declared read tool, its arguments taken from earlier calls in the run | pass |
-| P3 | respell numeric arguments with the same value (`25` ↔ `25.0`, wrapper JSON included) | pass |
+| P3 | respell numeric arguments with the same value (`25` ↔ `25.0`, discoverable-wrapper `arguments` strings included) | pass |
 | P5 | insert a call to `no_such_tool` with `{}` arguments | pass |
 | F1 | run nothing | fail |
 | F3 | drop one write whose removal changes the live end state | fail |
@@ -51,8 +51,10 @@ a task whose gold run raises or scores 0 stays in the results as "gold not accep
   variant whose inserted tool also appears in the gold run; H1(a) counts those apart on both sides, because v1.0.1
   keeps logging reads the gold run itself requires by design.
 - **P3** respells every numeric argument with the same value, integral `int` to `float` and integral `float` to `int`,
-  rewriting the number tokens inside a wrapper's `arguments` string too, so the parsed value is unchanged and the
-  spelling differs. Booleans are not numbers. Nothing to respell means no variant (`identical_to_gold`).
+  so the parsed value is unchanged and the spelling differs. Booleans are not numbers. Number tokens inside a JSON
+  `arguments` string are rewritten only for the discoverable wrappers (`call_discoverable_agent_tool`,
+  `call_discoverable_user_tool`, `give_discoverable_user_tool`); a string argument named `arguments` on any other tool
+  is left as it is. Nothing to respell means no variant (`identical_to_gold`).
 - **P5** inserts `no_such_tool` with `{}` arguments, as the assistant, at a position drawn with the seed. The variant
   is kept only when the agent and user DB hashes right after the inserted call equal those right before it; otherwise
   the task records `p5_not_inert` and gets no P5 variant. If that validation replay raises, the exception is recorded
@@ -150,7 +152,8 @@ both sides with identical fixtures) count toward the hypotheses. It writes a Mar
 - the tasks whose fixture changed, with which fingerprint differs (`task_fingerprint` or `gold_output_fingerprint`),
   and tasks present on one side only;
 - comparable variants with no counterpart ("unpaired"), listed one by one;
-- the flags present on the old grader and absent on the new one, by task and relation;
+- the flags present on the old grader and absent on the new one, one line per pair (a pair flagged on OLD whose NEW
+  counterpart is a verdict and not flagged), giving domain, task, relation and `detail`;
 - one line each for H1(a), H1(b) and H2 of the pre-registration, with the numbers behind them:
   H1(a) holds when a comparable banking P1 pair whose inserted tool is not in the gold run is flagged on the old
   grader and no such pair is flagged on the new one, the new grader produced at least one verdict in that group, and

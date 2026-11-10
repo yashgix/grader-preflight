@@ -73,10 +73,12 @@ wrapper) also appears in the gold run — the gold calls contribute their inner 
 counts those variants apart on both sides.
 
 **P3, respelled numbers.** Every numeric argument is respelled with the same value, integral `int` to `float` and
-integral `float` to `int`; a wrapper's JSON `arguments` string is rewritten token by token over its number literals, so
-the parsed value is unchanged and the string form differs. Booleans are left alone. Nothing to respell means no
-variant, recorded as `identical_to_gold`. This is the #397 check: a grader that hashes number echoes rather than
-values rejects the same state written differently.
+integral `float` to `int`; the JSON `arguments` string of a discoverable wrapper is rewritten token by token over its
+number literals, so the parsed value is unchanged and the string form differs. Only the three wrappers
+(`call_discoverable_agent_tool`, `call_discoverable_user_tool`, `give_discoverable_user_tool`) get that treatment: a
+string argument named `arguments` on any other tool is an ordinary string and is left as it is. Booleans are left
+alone. Nothing to respell means no variant, recorded as `identical_to_gold`. This is the #397 check: a grader that hashes
+number echoes rather than values rejects the same state written differently.
 
 **P5, an unknown tool.** The position is drawn with `rng` from `0..len(gold)`. The variant is kept only when the agent
 and user DB hash pair right after the inserted call equals the pair right before it; otherwise the generator returns
@@ -133,8 +135,8 @@ recorded in `static.relation_errors` under its relation id; neither aborts the t
   number that is not a boolean turned into a float, in canonical JSON. `25` and `25.0` therefore match, which matters
   because #397 changes number echoes on purpose.
 - `output_fingerprint` (per variant): the variant's live tool outputs, run through the same function, so a variant and
-the gold run can be compared on the state they produced as well as on the verdict. It is null when the variant raised
-before producing outputs.
+  the gold run can be compared on the state they produced as well as on the verdict. It is null when the variant raised
+  before producing outputs.
 
 Canonical JSON is `json.dumps(x, sort_keys=True, separators=(",", ":"), ensure_ascii=True)`. `end_state` is
 `{"variant": [agent hash, user hash], "gold": [agent hash, user hash]}`; `db_diff` names the top-level agent and user
@@ -177,7 +179,9 @@ The report holds, in order:
    and unpaired comparable variants;
 2. a table per domain and relation on each side: attempted, verdicts, errors, flagged variants and flagged tasks;
 3. the same table for P1 split by `inserted_in_gold` (`in gold`, `not in gold`);
-4. the flags present on OLD and absent on NEW, by task and relation;
+4. the flags present on OLD and absent on NEW, one line per pair: a pair flagged on OLD whose NEW counterpart is a
+   verdict and not flagged, with domain, `task_id`, `relation` and `detail`; flag sets are never subtracted task by
+   task, so two variants of one task whose flags move in opposite directions are told apart by their `detail`;
 5. one line each for H1(a), H1(b) and H2, starting `held` or `not held`, with the numbers behind them, the `db_diff`
    field sets of the H1 part's OLD flags with their counts, and how many of its pairs differ in `output_fingerprint`;
 6. the control line and its mismatches;

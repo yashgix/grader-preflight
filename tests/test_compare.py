@@ -164,6 +164,20 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(metrics['attempted_new'], 1)
         self.assertEqual(metrics['errors_new'], 1)
 
+    def test_old_only_flags_are_listed_by_pair_and_detail(self):
+        old_first = variant('A', 'P1', detail='p1 first', reward=1.0, flagged=True)
+        new_first = variant('A', 'P1', detail='p1 first', reward=0.0, flagged=False)
+        old_second = variant('A', 'P1', detail='p1 second', reward=0.0, flagged=False)
+        new_second = variant('A', 'P1', detail='p1 second', reward=1.0, flagged=True)
+        old = [record(BANK, [task('A')], [old_first, old_second], 'old-sha')]
+        new = [record(BANK, [task('A')], [new_first, new_second], 'new-sha')]
+
+        out, _ = self.run_compare(old, new)
+        text = out.read_text(encoding='utf-8')
+        section = text.split('## Flags on OLD and absent on NEW', 1)[1].split('## Hypotheses', 1)[0]
+        self.assertIn('p1 first', section)
+        self.assertNotIn('p1 second', section)
+
     def test_p3_pair_holds_h1b(self):
         old_variant = variant('A', 'P3', reward=1.0, flagged=True)
         new_variant = variant('A', 'P3', reward=0.0, flagged=False)
@@ -365,7 +379,7 @@ class CompareTest(unittest.TestCase):
 
         out, _ = self.run_compare(old, new)
         text = out.read_text(encoding='utf-8')
-        self.assertIn('["balance"]', text)
+        self.assertIn(json.dumps(['balance']), text)
         self.assertIn('output_fingerprints differ: 1', text)
 
     def test_records_digest_matches_independent_calculation(self):

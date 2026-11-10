@@ -66,8 +66,8 @@ class FingerprintTest(unittest.TestCase):
             self.assertEqual(gold_fingerprint(object()), expected)
 
     def test_output_fingerprint_exact_value_with_non_ascii(self):
-        outputs = ['{"b": 1, "a": "é"}', "25"]
-        normalized = [{"a": "é", "b": 1.0}, 25.0]
+        outputs = ['{"b": 1, "a": "\u00e9"}', "25"]
+        normalized = [{"a": "\u00e9", "b": 1.0}, 25.0]
         expected = hashlib.sha256(_canonical_json(normalized).encode("utf-8")).hexdigest()
         self.assertEqual(output_fingerprint(outputs), expected)
 
@@ -175,6 +175,19 @@ class _Env:
         self.db = _DB(agent, user)
 
 
+class _Toolkit:
+    def __init__(self, db):
+        self.db = db
+
+
+class _ToolkitEnv:
+    """An environment whose agent and user toolkits each expose their own DB."""
+
+    def __init__(self, agent, user):
+        self.tools = _Toolkit(agent)
+        self.user_tools = _Toolkit(user)
+
+
 class DbDiffTest(unittest.TestCase):
     def test_top_level_names_that_differ(self):
         left = _Env({"a": "x", "b": 1}, {"c": True})
@@ -185,6 +198,16 @@ class DbDiffTest(unittest.TestCase):
         left = _Env({"a": None}, {})
         right = _Env({}, {})
         self.assertEqual(_db_diff(left, right), ["a"])
+
+    def test_only_the_changed_user_field_differs(self):
+        left = _ToolkitEnv({"a": 1, "b": 2}, {"c": "x", "d": [1, 2]})
+        right = _ToolkitEnv({"a": 1, "b": 2}, {"c": "x", "d": [1, 3]})
+        self.assertEqual(_db_diff(left, right), ["d"])
+
+    def test_identical_toolkit_dbs_give_no_diff(self):
+        left = _ToolkitEnv({"a": 1}, {"c": "x"})
+        right = _ToolkitEnv({"a": 1}, {"c": "x"})
+        self.assertEqual(_db_diff(left, right), [])
 
     def test_real_banking_gold_run_diff_is_non_empty(self):
         task = tasks("banking_knowledge")[0]
