@@ -1,9 +1,4 @@
-"""Relations: small edits to a gold run whose expected effect on the grader's verdict is known in advance.
-
-Each generator builds candidate variants for one relation. :func:`build_variants` is the single entry point: it
-drops variants that equal the gold run and the P5 variant the live environment shows is not inert, and reports
-each skip as a note for the task's static entry.
-"""
+"""Relations: small edits to a gold run whose expected effect on the verdict is known in advance."""
 
 import inspect
 import json
@@ -55,15 +50,29 @@ def _loads(text):
         return _MISSING
 
 
+def _named_tools(tools) -> dict:
+    return {tool.name: tool for tool in tools if getattr(tool, "name", None)}
+
+
 def _toolkit_tools(toolkit, discoverable: bool = False) -> dict:
     if toolkit is None:
         return {}
     getter = getattr(toolkit, "get_discoverable_tools" if discoverable else "get_tools", None)
     if callable(getter):
-        tools = getter()
-        return tools if isinstance(tools, dict) else {}
-    if isinstance(toolkit, dict) and not discoverable:
+        try:
+            tools = getter()
+        except Exception:
+            tools = None
+        if isinstance(tools, dict):
+            return tools
+        if isinstance(tools, (list, tuple)):
+            return _named_tools(tools)
+    if discoverable:
+        return {}
+    if isinstance(toolkit, dict):
         return toolkit
+    if isinstance(toolkit, (list, tuple)):
+        return _named_tools(toolkit)
     return {}
 
 
@@ -76,35 +85,46 @@ def _tool(toolkit, name: str):
 
 def _kind(tool) -> str:
     declared = getattr(tool, "tool_type", None)
+    if callable(declared):
+        try:
+            declared = declared()
+        except Exception:
+            declared = None
     value = getattr(declared, "value", declared)
     text = value.strip().lower() if isinstance(value, str) else ""
     return text if text in KINDS else "generic"
 
 
 def _declared_kind(toolkit, name: str) -> str:
-    if toolkit is None:
+    if toolkit is None or not isinstance(name, str) or not name:
         return "unknown"
-    tool = _tool(toolkit, name)
-    exists = tool is not None
+    direct = _toolkit_tools(toolkit)
+    discoverable = _toolkit_tools(toolkit, discoverable=True)
+    exists = name in direct or name in discoverable
     has_tool = getattr(toolkit, "has_tool", None)
     if callable(has_tool):
         try:
             exists = bool(has_tool(name)) or exists
         except Exception:
             pass
-    if not exists and name not in _toolkit_tools(toolkit, discoverable=True):
+    if not exists:
         return "unknown"
-    tool_type = getattr(toolkit, "tool_type", None)
-    if callable(tool_type):
+    declared = getattr(toolkit, "tool_type", None)
+    if callable(declared):
         try:
-            declared = tool_type(name)
+            declared = declared(name)
         except Exception:
             declared = None
-        value = getattr(declared, "value", declared)
-        text = value.strip().lower() if isinstance(value, str) else ""
-        if text in KINDS:
-            return text
-    return "generic" if tool is not None else "unknown"
+    elif isinstance(declared, dict):
+        declared = declared.get(name)
+    else:
+        declared = None
+    value = getattr(declared, "value", declared)
+    text = value.strip().lower() if isinstance(value, str) else ""
+    if text in KINDS:
+        return text
+    tool = direct.get(name) or discoverable.get(name)
+    return _kind(tool) if tool is not None else "generic"
 
 
 def _inner_name(call: Call) -> str | None:
@@ -158,6 +178,11 @@ def _schema(tool) -> dict:
     """The tool's JSON-schema parameters, preferring the authoritative openai_schema when it has one."""
     candidates = []
     schema = getattr(tool, "openai_schema", None)
+    if callable(schema):
+        try:
+            schema = schema()
+        except Exception:
+            schema = None
     function = schema.get("function") if isinstance(schema, dict) else None
     parameters = (function or {}).get("parameters")
     if isinstance(parameters, dict):
@@ -183,7 +208,7 @@ def _signature(tool) -> tuple[list, list]:
     names = [
         name
         for name, param in params.items()
-        if param.kind not in (param.VAR_POSITIONAL, param.VAR_KEYWORD)
+        if param.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
     ]
     return names, [name for name in names if params[name].default is inspect.Parameter.empty]
 
@@ -233,50 +258,42 @@ def _unlock_positions(gold: list[Call]) -> dict:
     return positions
 
 
-def _read_candidates(env: Environment, gold: list[Call]) -> list[tuple[str, str, int]]:
-    """(route, tool name, earliest insert position) for tools the run can reach."""
-    tools = getattr(env, "tools", None)
-    direct_tools = _toolkit_tools(tools)
-    discoverable = _toolkit_tools(tools, discoverable=True)
-    unlocked = _unlock_positions(gold)
-    candidates = []
-    for name in sorted(direct_tools):
-        if name in NAME_KEY or name in discoverable or name in unlocked:
-            continue
-        candidates.append(("direct", name, 0))
-    for name, position in sorted(unlocked.items()):
-        candidates.append(("agent", name, position))
-    return candidates
-
-
-def _tool_after(domain: str, task: Task, gold: list[Call], position: int, name: str):
-    """The named tool in the toolkit as it stands after replaying the gold prefix."""
-    try:
-        _, env = run(domain, task, list(gold[:position]))
-    except Exception:
+def _plan_for(route: str, name: str, tool, supplied: dict, unlock_at: int = 0):
+    _, required = _parameters(tool)
+    if any(arg not in supplied for arg in required):
         return None
-    return _tool(getattr(env, "tools", None), name)
+    positions = [supplied[arg][0] + 1 for arg in required]
+    position = max([unlock_at] + positions)
+    arguments = {arg: supplied[arg][1] for arg in required}
+    return route, name, position, arguments
 
 
 def _p1_plans(domain: str, task: Task, gold: list[Call]) -> list[tuple[str, str, int, dict]]:
     """(route, name, insert position, arguments) for reads whose required arguments earlier calls supply."""
     env = fresh_env(domain, task)
     tools = getattr(env, "tools", None)
+    direct_tools = _toolkit_tools(tools)
+    discoverable_tools = _toolkit_tools(tools, discoverable=True)
     supplied = _argument_index(gold)
+    unlocked = _unlock_positions(gold)
     plans = []
-    for route, name, unlock_at in _read_candidates(env, gold):
-        tool = _tool_after(domain, task, gold, unlock_at, name) if route == "agent" else _tool(tools, name)
-        if tool is None or _kind(tool) != READ:
+    for name, tool in sorted(direct_tools.items()):
+        if name in NAME_KEY or name in UNLOCK_KEY or name in discoverable_tools:
             continue
-        _, required = _parameters(tool)
-        if any(arg not in supplied for arg in required):
+        # A tool's declared kind lives on the toolkit, not necessarily on the Tool object it hands out.
+        if _declared_kind(tools, name) != READ:
             continue
-        positions = [supplied[arg][0] for arg in required]
-        position = max([unlock_at] + [index + 1 for index in positions])
-        if any(supplied[arg][0] >= position for arg in required):
+        plan = _plan_for("direct", name, tool, supplied)
+        if plan:
+            plans.append(plan)
+    for name, tool in sorted(discoverable_tools.items()):
+        if name in NAME_KEY or name in UNLOCK_KEY:
             continue
-        arguments = {arg: supplied[arg][1] for arg in required}
-        plans.append((route, name, position, arguments))
+        if _declared_kind(tools, name) != READ:
+            continue
+        plan = _plan_for("agent", name, tool, supplied, unlocked.get(name, 0))
+        if plan:
+            plans.append(plan)
     plans.sort(key=lambda plan: (plan[0], plan[1], plan[2]))
     return plans
 
@@ -289,7 +306,25 @@ def _inserted_read(route: str, name: str, arguments: dict) -> Call:
     if route == "direct":
         return Call(name, arguments)
     wrapper = AGENT_WRAPPER if route == "agent" else USER_WRAPPER
-    return Call(wrapper, {NAME_KEY[wrapper]: name, "arguments": json.dumps(arguments)})
+    return Call(wrapper, {NAME_KEY[wrapper]: name, "arguments": json.dumps(arguments, sort_keys=True)})
+
+
+def _unlocked_before(gold: list[Call], name: str, position: int) -> bool:
+    for call in gold[:position]:
+        key = UNLOCK_KEY.get(call.name)
+        if key and (call.arguments or {}).get(key) == name:
+            return True
+    return False
+
+
+def _insert_with_unlock(
+    gold: list[Call], route: str, name: str, position: int, arguments: dict
+) -> tuple[tuple[Call, ...], int]:
+    read = _inserted_read(route, name, arguments)
+    if route == "agent" and not _unlocked_before(gold, name, position):
+        unlock = Call(UNLOCK_AGENT, {"agent_tool_name": name})
+        return tuple(gold[:position]) + (unlock, read) + tuple(gold[position:]), position + 1
+    return _insert(gold, position, read), position
 
 
 def _ran_cleanly(domain: str, task: Task, calls: tuple[Call, ...], position: int) -> bool:
@@ -300,17 +335,28 @@ def _ran_cleanly(domain: str, task: Task, calls: tuple[Call, ...], position: int
     return bool(messages) and not tool_error(messages[-1])
 
 
+def _p1_priority(plan, in_gold):
+    route, name, _, _ = plan
+    if route == "agent" and name not in in_gold:
+        return 0
+    if route == "agent":
+        return 1
+    return 2
+
+
 def p1_extra_read(domain: str, task: Task, rng: random.Random) -> list[Variant]:
     gold = gold_calls(task)
     plans = _p1_plans(domain, task, gold)
-    rng.shuffle(plans)
     in_gold = {_inner_name(call) or call.name for call in gold}
+    # Previously unused discoverable reads are the case that can expose the banking #329 fix;
+    # keep them from being crowded out by direct reads before the five-variant limit.
+    plans.sort(key=lambda plan: (_p1_priority(plan, in_gold), rng.random()))
     variants = []
     for route, name, position, arguments in plans:
-        calls = _insert(gold, position, _inserted_read(route, name, arguments))
-        if not _ran_cleanly(domain, task, calls, position):
+        calls, read_index = _insert_with_unlock(gold, route, name, position, arguments)
+        if not _ran_cleanly(domain, task, calls, read_index):
             continue
-        detail = f"extra {route} read of {name} at position {position}"
+        detail = f"extra {route} read of {name} at position {read_index}"
         variants.append(Variant("P1", calls, True, detail, name in in_gold))
         if len(variants) == MAX_P1_VARIANTS:
             break
@@ -408,10 +454,21 @@ def p3_respelled_numbers(domain: str, task: Task, rng: random.Random) -> list[Va
     return [Variant("P3", calls, True, "numeric arguments respelled (same value, different spelling)")]
 
 
+def _p5_inert(domain: str, task: Task, calls: tuple[Call, ...]) -> bool:
+    """True when the unknown-tool call leaves both DB hashes alone; a replay that raises is never a pass."""
+    position = next(index for index, call in enumerate(calls) if call.name == UNKNOWN_TOOL)
+    before = db_hashes(run(domain, task, list(calls[:position]))[1])
+    after = db_hashes(run(domain, task, list(calls[: position + 1]))[1])
+    return before == after
+
+
 def p5_unknown_tool(domain: str, task: Task, rng: random.Random) -> list[Variant]:
+    """The unknown call, kept only when the live DB hashes around it are unchanged."""
     gold = gold_calls(task)
     position = rng.randrange(len(gold) + 1)
     calls = _insert(gold, position, Call(UNKNOWN_TOOL, {}))
+    if not _p5_inert(domain, task, calls):
+        return []
     return [Variant("P5", calls, True, f"call to {UNKNOWN_TOOL} inserted at position {position}")]
 
 
@@ -466,14 +523,6 @@ RELATIONS = {
 }
 
 
-def _p5_inert(domain: str, task: Task, calls: tuple[Call, ...]) -> bool:
-    """True when the unknown-tool call leaves both DB hashes alone; a replay that raises is never a pass."""
-    position = next(index for index, call in enumerate(calls) if call.name == UNKNOWN_TOOL)
-    before = db_hashes(run(domain, task, list(calls[:position]))[1])
-    after = db_hashes(run(domain, task, list(calls[: position + 1]))[1])
-    return before == after
-
-
 def build_variants(relation: str, domain: str, task: Task, rng: random.Random) -> tuple[list[Variant], dict]:
     """Variants for one relation with gold-identical ones dropped; notes say what was skipped and why."""
     gold = gold_calls(task)
@@ -488,18 +537,20 @@ def build_variants(relation: str, domain: str, task: Task, rng: random.Random) -
     if relation == "P3" and not variants:
         if canonical_json(calls_as_dicts(_respelled_calls(gold))) == gold_json:
             notes["identical_to_gold"] = True
-    if relation == "P5" and kept and not _p5_inert(domain, task, kept[0].calls):
+    if relation == "P5" and not variants:
+        # P5 builds one candidate; the generator drops it only when the unknown call changed the live DB.
         notes["p5_not_inert"] = True
-        kept = []
     return kept, notes
 
 
 def _outputs(messages: list, count: int) -> list:
     """The tool messages of the last `count` calls in a run's message list."""
-    if not count:
+    if count <= 0:
         return []
     start = len(messages) - 2 * count + 1
-    return [messages[start + 2 * index] for index in range(count)]
+    if start < 0:
+        return []
+    return [messages[start + 2 * index] for index in range(count) if start + 2 * index < len(messages)]
 
 
 def static_checks(domain: str, task: Task) -> dict:

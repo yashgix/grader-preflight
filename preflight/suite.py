@@ -6,7 +6,6 @@ import platform
 import random
 import sys
 import time
-import tomllib
 from pathlib import Path
 
 from tau2.evaluator.evaluator_env import EnvironmentEvaluator
@@ -22,7 +21,7 @@ from preflight.relations import (
     static_checks,
     tool_error,
 )
-from preflight.tau2_adapter import ENV_KWARGS, gold_calls, run, tasks
+from preflight.tau2_adapter import env_kwargs, gold_calls, run, tasks
 
 _MISSING = object()
 STATIC_KEYS = ("gold_errors", "gold_changes_db", "no_effect_writes")
@@ -71,6 +70,7 @@ def _content(message):
 
 
 def _tool_outputs(messages, count):
+    """The tool messages of the last `count` calls in a run's message list."""
     if count <= 0:
         return []
     start = len(messages) - 2 * count + 1
@@ -90,9 +90,10 @@ def _error_info(exc):
 
 
 def _reward(domain, task, messages):
+    """The DB-state verdict of tau2's unchanged grader, with the env arguments tau2's runner uses."""
     constructor = registry.get_env_constructor(domain)
     return EnvironmentEvaluator.calculate_reward(
-        constructor, task, messages, env_kwargs=ENV_KWARGS.get(domain, {})
+        constructor, task, messages, env_kwargs=env_kwargs(domain, task)
     ).reward
 
 
@@ -191,6 +192,7 @@ def _same(left, right):
 
 
 def _db_diff(env, gold_env):
+    """Top-level DB field names whose values differ between the variant's state and the gold run's."""
     variant_agent, variant_user = _db_pair(env)
     gold_agent, gold_user = _db_pair(gold_env)
     names = set()
@@ -207,40 +209,21 @@ def _records_sha256(variants):
     return _sha256("\n".join(canonical_json(record) for record in records))
 
 
-def _project_version(path):
+def _source_text():
+    """The environment's SOURCE.txt, which names the tau2 tag it was built from."""
     try:
-        with path.open("rb") as handle:
-            data = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError):
-        return None
-    return data.get("project", {}).get("version")
-
-
-def _tau2_version():
-    try:
-        import tau2
-    except Exception:
-        return None
-    module = getattr(tau2, "__file__", None)
-    if not module:
-        return None
-    path = Path(module).resolve()
-    for parent in path.parents:
-        pyproject = parent / "pyproject.toml"
-        if pyproject.is_file() and (parent / "src").is_dir():
-            return _project_version(pyproject)
-    for parent in path.parents:
-        pyproject = parent / "pyproject.toml"
-        if pyproject.is_file():
-            return _project_version(pyproject)
-    return None
-
-
-def _provenance():
-    try:
-        source = (Path(sys.prefix) / "SOURCE.txt").read_text().strip()
+        return (Path(sys.prefix) / "SOURCE.txt").read_text(encoding="utf-8").strip()
     except OSError:
-        source = None
+        return None
+
+
+def _tau2_version(source):
+    """The tag named on SOURCE.txt's first line, its second word (`pre-v1.0.1` or `v1.0.1`)."""
+    words = source.splitlines()[0].split() if source else []
+    return words[1] if len(words) > 1 else None
+
+
+def _provenance(source):
     return {"source": source, "python": platform.python_version()}
 
 
@@ -368,11 +351,12 @@ def run_suite(domain, relations=None, seed=0, limit=None):
     variant_records = []
     for task in domain_tasks:
         task_records.append(_task_record(domain, task, selected, seed, variant_records))
+    source = _source_text()
     return {
         "domain": domain,
         "seed": seed,
-        "tau2_version": _tau2_version(),
-        "provenance": _provenance(),
+        "tau2_version": _tau2_version(source),
+        "provenance": _provenance(source),
         "tasks": task_records,
         "variants": variant_records,
         "records_sha256": _records_sha256(variant_records),

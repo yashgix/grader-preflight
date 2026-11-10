@@ -62,7 +62,7 @@ def _print_variants(result: dict) -> None:
         flags = sum(1 for item in variants if item["flagged"] is True)
         print(f"{relation}: {len(variants)} variants, {errors} errors, {flags} flags")
         for variant in variants:
-            mark = "FLAG" if variant["flagged"] else "ok"
+            mark = "FLAG" if variant["flagged"] is True else "ok"
             print(f"  {mark:<4} {variant['task_id']} {_outcome_text(variant)}: {variant['detail']}")
 
 

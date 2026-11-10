@@ -137,9 +137,7 @@ def _control_mismatches(old_files, new_files, old_tasks, new_tasks, changed):
     old_map = {_variant_key(domain, variant): variant for domain, variant in _variants(old_files)}
     new_map = {_variant_key(domain, variant): variant for domain, variant in _variants(new_files)}
     identical = {
-        key
-        for key in set(old_tasks) & set(new_tasks)
-        if key[0] in CONTROL_DOMAINS and key not in changed
+        key for key in set(old_tasks) & set(new_tasks) if key[0] in CONTROL_DOMAINS and key not in changed
     }
     mismatches = []
     for key in sorted(set(old_map) | set(new_map), key=lambda item: tuple(str(part) for part in item)):
@@ -220,36 +218,26 @@ def _static_counts(files):
 
 
 def _h2(variants):
-    f3 = [(domain, variant) for domain, variant in variants if variant.get("relation") == "F3"]
-    f3_verdicts = [variant for _, variant in f3 if variant.get("outcome") == "verdict"]
+    """The four parts of H2 on the new side; a part with no verdict behind it is not held."""
+    f3 = [variant for _, variant in variants if variant.get("relation") == "F3"]
+    f3_verdicts = [variant for variant in f3 if variant.get("outcome") == "verdict"]
     f3_passes = sum(1 for variant in f3_verdicts if variant.get("reward") == 1.0)
-    f3_errors = sum(1 for _, variant in f3 if variant.get("outcome") == "error")
     f3_rate = f3_passes / len(f3_verdicts) if f3_verdicts else 0.0
+    f3_held = bool(f3_verdicts) and f3_rate <= 0.01
 
     f1_airline = [
-        (domain, variant)
-        for domain, variant in variants
-        if domain == "airline" and variant.get("relation") == "F1"
+        variant for domain, variant in variants if domain == "airline" and variant.get("relation") == "F1"
     ]
-    f1_tasks = {
-        variant.get("task_id")
-        for _, variant in f1_airline
-        if variant.get("outcome") == "verdict" and variant.get("reward") == 1.0
-    }
-    f1_errors = sum(1 for _, variant in f1_airline if variant.get("outcome") == "error")
+    f1_verdicts = [variant for variant in f1_airline if variant.get("outcome") == "verdict"]
+    f1_tasks = {variant.get("task_id") for variant in f1_verdicts if variant.get("reward") == 1.0}
 
-    f6 = [
-        (domain, variant)
-        for domain, variant in variants
-        if domain == BANK and variant.get("relation") == "F6"
-    ]
-    f6_attempted_tasks = {variant.get("task_id") for _, variant in f6}
-    f6_verdicts = [variant for _, variant in f6 if variant.get("outcome") == "verdict"]
-    f6_tasks = {variant.get("task_id") for variant in f6_verdicts}
+    f6 = [variant for domain, variant in variants if domain == BANK and variant.get("relation") == "F6"]
+    f6_attempted = {variant.get("task_id") for variant in f6}
+    f6_verdicts = [variant for variant in f6 if variant.get("outcome") == "verdict"]
+    f6_verdict_tasks = {variant.get("task_id") for variant in f6_verdicts}
     f6_passes = {variant.get("task_id") for variant in f6_verdicts if variant.get("reward") == 1.0}
-    f6_errors = sum(1 for _, variant in f6 if variant.get("outcome") == "error")
-    f6_error_tasks = {variant.get("task_id") for _, variant in f6 if variant.get("outcome") == "error"}
-    f6_share = len(f6_passes) / len(f6_tasks) if f6_tasks else 0.0
+    f6_share = len(f6_passes) / len(f6_verdict_tasks) if f6_verdict_tasks else 0.0
+    f6_held = bool(f6_verdict_tasks) and f6_share >= 0.5
 
     p_flags = sum(
         1
@@ -259,25 +247,25 @@ def _h2(variants):
         and variant.get("flagged") is True
     )
     p_errors = sum(
-        1
-        for _, variant in variants
-        if variant.get("relation") in P_RELATIONS and variant.get("outcome") == "error"
+        1 for _, variant in variants if variant.get("relation") in P_RELATIONS and variant.get("outcome") == "error"
     )
-    held = f3_rate <= 0.01 and len(f1_tasks) >= 20 and f6_share >= 0.5 and p_flags > 0
     return {
-        "held": held,
+        "held": f3_held and len(f1_tasks) >= 20 and f6_held and p_flags > 0,
         "f3_rate": f3_rate,
         "f3_passes": f3_passes,
         "f3_verdicts": len(f3_verdicts),
-        "f3_errors": f3_errors,
+        "f3_errors": sum(1 for variant in f3 if variant.get("outcome") == "error"),
+        "f3_held": f3_held,
         "f1_tasks": len(f1_tasks),
-        "f1_errors": f1_errors,
+        "f1_verdicts": len(f1_verdicts),
+        "f1_errors": sum(1 for variant in f1_airline if variant.get("outcome") == "error"),
         "f6_share": f6_share,
+        "f6_held": f6_held,
         "f6_passes": len(f6_passes),
-        "f6_tasks": len(f6_tasks),
-        "f6_attempted_tasks": len(f6_attempted_tasks),
-        "f6_errors": f6_errors,
-        "f6_error_tasks": len(f6_error_tasks),
+        "f6_attempted_tasks": len(f6_attempted),
+        "f6_verdict_tasks": len(f6_verdict_tasks),
+        "f6_errors": sum(1 for variant in f6 if variant.get("outcome") == "error"),
+        "f6_error_tasks": len({variant.get("task_id") for variant in f6 if variant.get("outcome") == "error"}),
         "p_flags": p_flags,
         "p_errors": p_errors,
     }
@@ -299,6 +287,27 @@ def _sorted_f1(split):
     return sorted(split.items(), key=lambda item: (str(item[0][0]), F1_ORDER[item[0][1]]))
 
 
+def _relation_table(side, rows):
+    lines = []
+    for (domain, relation), row in _sorted_rows(rows):
+        lines.append(
+            _table_row(
+                side,
+                domain,
+                relation,
+                row["attempted"],
+                row["verdicts"],
+                row["errors"],
+                row["flagged_variants"],
+                len(row["flagged_tasks"]),
+                len(row["attempted_tasks"]),
+                len(row["verdict_tasks"]),
+                len(row["error_tasks"]),
+            )
+        )
+    return lines
+
+
 def compare(old_dir, new_dir, out_path):
     """Write a Markdown report and metrics.json beside it; return the metrics object."""
     old_files = _load(old_dir)
@@ -314,22 +323,27 @@ def compare(old_dir, new_dir, out_path):
     old_all = list(_variants(old_files))
     new_all = list(_variants(new_files))
 
-    old_p1 = _without_changed(_flagged(old_rows, BANK, "P1"), BANK, changed)
-    new_p1_all = _without_changed(_flagged(new_rows, BANK, "P1"), BANK, changed)
+    # H1(a) compares like with like: variants whose inserted tool also appears in the gold run are apart on both sides.
+    old_p1 = _without_changed(_flagged(old_p1_rows, BANK, NOT_IN_GOLD), BANK, changed)
+    new_p1 = _without_changed(_flagged(new_p1_rows, BANK, NOT_IN_GOLD), BANK, changed)
     new_p1_in_gold = _without_changed(_flagged(new_p1_rows, BANK, IN_GOLD), BANK, changed)
-    new_p1_non_gold = _without_changed(_flagged(new_p1_rows, BANK, NOT_IN_GOLD), BANK, changed)
-    h1a_held = bool(old_p1) and not new_p1_non_gold
+    old_p1_all = _without_changed(_flagged(old_p1_rows, BANK, IN_GOLD), BANK, changed) | old_p1
+    new_p1_all = _without_changed(_flagged(new_p1_rows, BANK, IN_GOLD), BANK, changed) | new_p1
 
-    old_p1_errors = _outcome_count(old_files, BANK, "P1", "error", changed)
-    new_p1_errors = _outcome_count(new_files, BANK, "P1", "error", changed)
-    new_p1_non_gold_errors = _outcome_count(new_files, BANK, "P1", "error", changed, False)
+    old_p1_errors = _outcome_count(old_files, BANK, "P1", "error", changed, False)
+    new_p1_errors = _outcome_count(new_files, BANK, "P1", "error", changed, False)
     new_p1_in_gold_errors = _outcome_count(new_files, BANK, "P1", "error", changed, True)
+    new_p1_verdicts = _outcome_count(new_files, BANK, "P1", "verdict", changed, False)
+
+    # A fix is only observed when NEW actually produced a verdict on a comparable variant.
+    h1a_held = bool(old_p1) and not new_p1 and new_p1_verdicts > 0
 
     old_p3 = _without_changed(_flagged(old_rows, BANK, "P3"), BANK, changed)
     new_p3 = _without_changed(_flagged(new_rows, BANK, "P3"), BANK, changed)
-    h1b_held = bool(old_p3) and not new_p3
     old_p3_errors = _outcome_count(old_files, BANK, "P3", "error", changed)
     new_p3_errors = _outcome_count(new_files, BANK, "P3", "error", changed)
+    new_p3_verdicts = _outcome_count(new_files, BANK, "P3", "verdict", changed)
+    h1b_held = bool(old_p3) and not new_p3 and new_p3_verdicts > 0
 
     h2 = _h2(new_all)
     mismatches = _control_mismatches(old_files, new_files, old_tasks, new_tasks, changed)
@@ -349,9 +363,7 @@ def compare(old_dir, new_dir, out_path):
         "",
     ]
     if changed:
-        for (domain, task_id), parts in sorted(
-            changed.items(), key=lambda item: (str(item[0][0]), str(item[0][1]))
-        ):
+        for (domain, task_id), parts in sorted(changed.items(), key=lambda item: (str(item[0][0]), str(item[0][1]))):
             lines.append(f"- {domain}/{task_id}: {', '.join(parts)}")
     else:
         lines.append("None.")
@@ -362,23 +374,8 @@ def compare(old_dir, new_dir, out_path):
         "Attempted tasks | Verdict tasks | Error tasks |"
     )
     lines.append("| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
-    for side, rows in (("old", old_rows), ("new", new_rows)):
-        for (domain, relation), row in _sorted_rows(rows):
-            lines.append(
-                _table_row(
-                    side,
-                    domain,
-                    relation,
-                    row["attempted"],
-                    row["verdicts"],
-                    row["errors"],
-                    row["flagged_variants"],
-                    len(row["flagged_tasks"]),
-                    len(row["attempted_tasks"]),
-                    len(row["verdict_tasks"]),
-                    len(row["error_tasks"]),
-                )
-            )
+    lines += _relation_table("old", old_rows)
+    lines += _relation_table("new", new_rows)
 
     lines += ["", "## P1 split by inserted_in_gold", ""]
     lines.append(
@@ -386,23 +383,8 @@ def compare(old_dir, new_dir, out_path):
         "Attempted tasks | Verdict tasks | Error tasks |"
     )
     lines.append("| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
-    for side, rows in (("old", old_p1_rows), ("new", new_p1_rows)):
-        for (domain, label), row in _sorted_rows(rows):
-            lines.append(
-                _table_row(
-                    side,
-                    domain,
-                    label,
-                    row["attempted"],
-                    row["verdicts"],
-                    row["errors"],
-                    row["flagged_variants"],
-                    len(row["flagged_tasks"]),
-                    len(row["attempted_tasks"]),
-                    len(row["verdict_tasks"]),
-                    len(row["error_tasks"]),
-                )
-            )
+    lines += _relation_table("old", old_p1_rows)
+    lines += _relation_table("new", new_p1_rows)
 
     old_flags = {
         (domain, variant.get("task_id"), variant.get("relation"))
@@ -424,25 +406,26 @@ def compare(old_dir, new_dir, out_path):
 
     lines += ["", "## Hypotheses", ""]
     lines.append(
-        f"H1(a): {'held' if h1a_held else 'not held'} - OLD P1 flagged banking tasks: "
-        f"{len(old_p1)} ({_names(old_p1)}), errors: {old_p1_errors}; NEW P1 flagged non-in-gold tasks: "
-        f"{len(new_p1_non_gold)} ({_names(new_p1_non_gold)}), errors: {new_p1_non_gold_errors}; "
-        f"NEW P1 in-gold flagged tasks: {len(new_p1_in_gold)} ({_names(new_p1_in_gold)}), errors: "
-        f"{new_p1_in_gold_errors}; NEW P1 flagged tasks all: {len(new_p1_all)}; NEW P1 errors all: "
-        f"{new_p1_errors}."
+        f"H1(a): {'held' if h1a_held else 'not held'} - OLD P1 flagged banking tasks not in gold: "
+        f"{len(old_p1)} ({_names(old_p1)}), errors: {old_p1_errors}; NEW P1 flagged banking tasks not in gold: "
+        f"{len(new_p1)} ({_names(new_p1)}), errors: {new_p1_errors}, verdicts: {new_p1_verdicts}; NEW P1 in-gold "
+        f"flagged tasks: {len(new_p1_in_gold)} ({_names(new_p1_in_gold)}), errors: {new_p1_in_gold_errors}; OLD P1 "
+        f"flagged tasks all: {len(old_p1_all)}; NEW P1 flagged tasks all: {len(new_p1_all)}."
     )
     lines.append(
         f"H1(b): {'held' if h1b_held else 'not held'} - OLD P3 flagged banking tasks: "
         f"{len(old_p3)} ({_names(old_p3)}), errors: {old_p3_errors}; NEW P3 flagged banking tasks: "
-        f"{len(new_p3)} ({_names(new_p3)}), errors: {new_p3_errors}."
+        f"{len(new_p3)} ({_names(new_p3)}), errors: {new_p3_errors}, verdicts: {new_p3_verdicts}."
     )
     lines.append(
         f"H2: {'held' if h2['held'] else 'not held'} - F3 pass rate NEW: "
-        f"{h2['f3_rate']:.4f} ({h2['f3_passes']}/{h2['f3_verdicts']}; {h2['f3_errors']} errors); "
-        f"F1 airline passing tasks NEW: {h2['f1_tasks']} ({h2['f1_errors']} errors); "
-        f"F6 banking pass share NEW: {h2['f6_share']:.4f} "
-        f"({h2['f6_passes']}/{h2['f6_tasks']}; {h2['f6_errors']} errors on {h2['f6_error_tasks']} tasks; "
-        f"{h2['f6_attempted_tasks']} attempted tasks); "
+        f"{h2['f3_rate']:.4f} ({h2['f3_passes']}/{h2['f3_verdicts']}; {h2['f3_errors']} errors; "
+        f"{'part held' if h2['f3_held'] else 'part not held'}); "
+        f"F1 airline passing tasks NEW: {h2['f1_tasks']} ({h2['f1_verdicts']} verdicts, {h2['f1_errors']} errors); "
+        f"F6 banking pass share NEW: {h2['f6_share']:.4f} ({h2['f6_passes']}/{h2['f6_verdict_tasks']} tasks "
+        f"with a verdict; {h2['f6_attempted_tasks']} attempted; {h2['f6_errors']} errors on "
+        f"{h2['f6_error_tasks']} tasks; "
+        f"{'part held' if h2['f6_held'] else 'part not held'}); "
         f"P-relation flagged variants NEW: {h2['p_flags']} ({h2['p_errors']} errors)."
     )
 
@@ -497,9 +480,7 @@ def compare(old_dir, new_dir, out_path):
         if not files:
             lines.append(f"- {side}: no JSON files")
         for data in sorted(files, key=lambda item: (str(item.get("domain")), item.get("_file", ""))):
-            lines.append(
-                f"- {side} {data.get('domain')}/{data.get('_file')}: {data.get('records_sha256')}"
-            )
+            lines.append(f"- {side} {data.get('domain')}/{data.get('_file')}: {data.get('records_sha256')}")
 
     metrics = {
         "h1a_held": int(h1a_held),
@@ -507,7 +488,7 @@ def compare(old_dir, new_dir, out_path):
         "h2_held": int(h2["held"]),
         "control_passed": int(control_passed),
         "control_mismatches": len(mismatches),
-        "p1_flagged_tasks_old": len(old_p1),
+        "p1_flagged_tasks_old": len(old_p1_all),
         "p1_flagged_tasks_new": len(new_p1_all),
         "p1_in_gold_flagged_tasks_new": len(new_p1_in_gold),
         "p3_flagged_tasks_old": len(old_p3),

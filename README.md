@@ -2,14 +2,14 @@
 
 An LLM-free preflight for graders of stateful tool environments. It takes a known-good run, makes small changes that
 should not matter (an extra read, `25` written as `25.0`, a call to a tool that does not exist) and changes that
-should (a dropped write, an empty run, identity verified after acting), then checks that the grader's verdict moves
-the right way. No language model is called: every variant is built from the gold run, from the environment's own tool
-metadata, and from the live DB state.
+should (a dropped write, an empty run, verification logged after the writes it gates), then checks that the grader's
+verdict moves the right way. No language model is called: every variant is built from the gold run, from the
+environment's own tool metadata, and from the live DB state.
 
 It targets τ²-bench's grader before and after the v1.0.1 fixes (`pre-v1.0.1` at `b51a6d6`, `v1.0.1` at `fc0055d`):
 does it find the bugs that were fixed by hand?
 
-**Status:** pre-registered and built; the experiment has not been run. Hypotheses, thresholds, seeds and the three
+**Status:** pre-registered and built; the experiment has not been run. The hypotheses, thresholds, seeds and the four
 amendments that fix the protocol are in [PREREGISTRATION.md](PREREGISTRATION.md), committed before any experiment.
 
 ## Scope
@@ -18,6 +18,10 @@ Only the environment-state terms of the reward are exercised: every verdict quot
 `EnvironmentEvaluator.calculate_reward`, called unchanged. The COMMUNICATE, NL_ASSERTION and ACTION terms are out of
 scope. Tasks are those with `DB` in their `reward_basis`, in `banking_knowledge` (the `grep_only` retrieval variant, so
 it runs offline), `airline` and `retail`. Telecom is not part of phase 1.
+
+On v1.0.1 banking logs a read to the hashed agent DB only when the read is on a per-task allowlist that τ²-bench's
+runner builds. The adapter derives the same allowlist with tau2's own `_derive_read_log_allowlist` and passes it to the
+live environment and to the grader, so banking is graded in the configuration τ²-bench actually runs.
 
 ## Relations
 
@@ -32,20 +36,26 @@ it runs offline), `airline` and `retail`. Telecom is not part of phase 1.
 
 A flag is a variant whose verdict differs from the one above.
 
-- **P1** uses direct agent reads plus discoverable reads the gold run reaches (a discoverable tool is a candidate only
-after the run has unlocked it), fills every required argument from a same-named earlier argument, inserts right after
-the call that supplied it, and keeps the variant only if the inserted call runs without an error on the live env.
-Required arguments come from the tool's JSON schema, with the decorated signature settling optionality when only a bare
-parameter mapping is available. At most 5 variants per task: candidates are shuffled with the seed and tried in that
-order, so a candidate that fails its replay never takes a slot. `inserted_in_gold` marks a variant whose inserted tool
-also appears in the gold run; the report counts those variants apart on `v1.0.1`, which keeps logging reads the gold
-itself requires.
+- **P1** uses the assistant toolkit's direct reads plus its discoverable reads, and a discoverable read is a candidate
+  whether or not the gold run has unlocked it. A tool counts as a read when the toolkit's declared `tool_type(name)`
+  says so. A discoverable read is called the way an agent calls it, through `call_discoverable_agent_tool` with a JSON
+  `arguments` string; when the run has not unlocked that tool before the insertion point, its
+  `unlock_discoverable_agent_tool` call goes right before the read, so a variant is the gold run plus the read, or plus
+  the unlock and the read. Required argument names come from the tool's JSON schema, with the decorated signature
+  settling optionality when only a bare parameter mapping is available; each required value is taken from the
+  same-named argument of an earlier call (inside wrapper `arguments` strings too) and the read goes right after the
+  last call that supplied one. The variant is kept only if replaying the prefix through the inserted read ends in a
+  tool message that is not an error. At most five variants per task: candidates are shuffled with the seed and tried
+  in that order, so a candidate that fails its replay never takes a slot. `inserted_in_gold` marks a variant whose
+  inserted tool also appears in the gold run; H1(a) counts those apart on both sides, because v1.0.1 keeps logging
+  reads the gold run itself requires by design.
 - **P3** respells every numeric argument, integral `int` to `float` and integral `float` to `int`, inside wrapper
-`arguments` strings too. Booleans are not numbers, and there is no variant when nothing changes.
+  `arguments` strings too, by rewriting the JSON number tokens so the parsed value is unchanged. Booleans are not
+  numbers, and there is no variant when nothing changes (`identical_to_gold`).
 - **P5** is kept only when the agent and user DB hashes right after the inserted call equal those right before it.
-Otherwise the task gets no P5 variant and `p5_not_inert` in its static entry; if the validation replay itself raises,
-the exception is recorded in `relation_errors` and the variant is not built, because a check that did not complete is
-not a check that passed.
+  Otherwise the task gets no P5 variant and `p5_not_inert` in its static entry; if the validation replay itself raises,
+  the exception is recorded in `relation_errors` and the variant is not built, because a check that did not complete
+  is not a check that passed.
 - **F3** skips writes whose removal changes no end state; they are counted as `no_effect_writes`.
 - **F6** exists only for banking tasks whose `log_verification` is followed by a write.
 
@@ -89,6 +99,8 @@ The whole experiment is one command:
 It runs the suite for all three domains under both environments (subprocesses, `--old-python` and `--new-python`
 override the defaults) and writes everything inside the folder that holds the output path: `run/results/old/*.json`,
 `run/results/new/*.json`, `run/report.md`, and the metrics at the output path itself. Two runs give identical metrics.
+The project itself recomputes nothing: the independent check of amendment 2 works from the per-case files the run
+leaves behind.
 
 Tests and the demo run in either environment:
 
@@ -104,7 +116,8 @@ above.
 ## Output
 
 Each result file holds `domain`, `seed`, `tau2_version`, `provenance` (the env's `SOURCE.txt` and the Python version),
-the task records, the variant records, a `records_sha256` over the variants and the elapsed `seconds`.
+the task records, the variant records, a `records_sha256` over the variants and the elapsed `seconds`. `tau2_version`
+is the tag named on the first line of `SOURCE.txt` (its second word).
 
 A task record holds `id`, `reward_basis`, its three fingerprints (`task_fingerprint`, `gold_fingerprint`,
 `gold_output_fingerprint`), the base run's `base_outcome` and `base_reward`, and a `static` entry with `gold_errors`,
@@ -135,8 +148,9 @@ The comparison writes a Markdown report and a numbers-only `metrics.json` beside
 `p1_in_gold_flagged_tasks_new`, `p3_flagged_tasks_old`, `p3_flagged_tasks_new`, `f1_pass_airline_new`,
 `f3_pass_rate_new`, `f6_pass_share_new`, `changed_tasks`, `attempted_old`, `attempted_new`, `errors_old`, `errors_new`,
 `records_digest_old`, `records_digest_new`. A side's `records_digest` is the integer value of the first 12 hex digits
-of the SHA-256 of its files' `records_sha256` values, sorted by domain and joined by newlines, so two identical runs
-agree on every case and not only on totals.
+of the SHA-256 of its files' `records_sha256` values, sorted by domain and joined by newlines, so a repeated run is
+compared on every variant case and not only on totals; a task's base run and static checks sit outside that digest and
+are checked from the per-case files instead.
 
 How the pieces fit, and what the checks do not cover, is in [docs/DESIGN.md](docs/DESIGN.md).
 

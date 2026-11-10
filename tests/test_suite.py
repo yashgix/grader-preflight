@@ -10,6 +10,7 @@ from preflight.suite import (
     _db_diff,
     _normalise_numbers,
     _records_sha256,
+    _tau2_version,
     _variant_record,
     gold_fingerprint,
     output_fingerprint,
@@ -69,6 +70,17 @@ class FingerprintTest(unittest.TestCase):
         normalized = [{"a": "é", "b": 1.0}, 25.0]
         expected = hashlib.sha256(_canonical_json(normalized).encode("utf-8")).hexdigest()
         self.assertEqual(output_fingerprint(outputs), expected)
+
+
+class VersionTest(unittest.TestCase):
+    def test_tau2_version_is_the_second_word_of_the_first_source_line(self):
+        self.assertEqual(_tau2_version("tau2-bench v1.0.1 (commit fc0055d)\n"), "v1.0.1")
+        self.assertEqual(_tau2_version("tau2-bench pre-v1.0.1\n"), "pre-v1.0.1")
+
+    def test_missing_source_or_short_line_gives_no_version(self):
+        self.assertIsNone(_tau2_version(None))
+        self.assertIsNone(_tau2_version(""))
+        self.assertIsNone(_tau2_version("tau2-bench\n"))
 
 
 class RecordsHashTest(unittest.TestCase):

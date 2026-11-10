@@ -9,7 +9,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-FAKE_PYTHON = '''#!{python}
+FAKE_PYTHON = """#!{python}
 import json
 import sys
 from pathlib import Path
@@ -55,7 +55,7 @@ payload = {{
     "seconds": 0.0,
 }}
 out.write_text(json.dumps(payload), encoding="utf-8")
-'''
+"""
 
 
 class ExperimentTest(unittest.TestCase):

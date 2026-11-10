@@ -65,30 +65,18 @@ def same_calls(left, right):
     return canonical_json(calls_as_dicts(left)) == canonical_json(calls_as_dicts(right))
 
 
-def insertion_positions(gold, calls):
+def read_positions(gold, calls):
+    """Positions of the inserted read in a variant that is the gold run plus one block (an unlock and the read)."""
     positions = []
     for index in range(len(calls)):
-        if same_calls(calls[:index], gold[:index]) and same_calls(calls[index + 1 :], gold[index:]):
-            positions.append(index)
-    if not positions:
-        raise AssertionError("the variant has no single inserted call")
-    return positions
-
-
-def argument_values(calls):
-    values = set()
-    for call in calls:
-        arguments = dict(call.arguments or {})
-        raw = arguments.pop("arguments", None)
-        values.update(canonical_json(value) for value in arguments.values())
-        if isinstance(raw, str):
-            try:
-                parsed = json.loads(raw)
-            except ValueError:
+        for size in (1, 2):
+            if index + size > len(calls):
                 continue
-            if isinstance(parsed, dict):
-                values.update(canonical_json(value) for value in parsed.values())
-    return values
+            if same_calls(calls[:index], gold[:index]) and same_calls(calls[index + size :], gold[index:]):
+                positions.append(index + size - 1)
+    if not positions:
+        raise AssertionError("the variant is not the gold run plus one inserted block")
+    return positions
 
 
 def argument_name_values(calls):
@@ -96,16 +84,16 @@ def argument_name_values(calls):
     for call in calls:
         arguments = dict(call.arguments or {})
         raw = arguments.pop("arguments", None)
-        for name, value in arguments.items():
-            values.setdefault(name, set()).add(canonical_json(value))
+        pairs = list(arguments.items())
         if isinstance(raw, str):
             try:
                 parsed = json.loads(raw)
             except ValueError:
-                continue
+                parsed = None
             if isinstance(parsed, dict):
-                for name, value in parsed.items():
-                    values.setdefault(name, set()).add(canonical_json(value))
+                pairs += list(parsed.items())
+        for name, value in pairs:
+            values.setdefault(name, set()).add(canonical_json(value))
     return values
 
 
@@ -222,7 +210,7 @@ class P1CandidateTest(unittest.TestCase):
         for variant in variants:
             self.assertNotIn(variant.calls[0].name, failing)
 
-    def test_inserted_call_reaches_the_unlocked_inner_tool(self):
+    def test_an_already_unlocked_read_gets_no_second_unlock(self):
         gold = [
             Call("unlock_discoverable_agent_tool", {"agent_tool_name": "get_details"}),
             Call("get_details", {"account_id": "A1"}),
@@ -234,11 +222,30 @@ class P1CandidateTest(unittest.TestCase):
             variants = p1_extra_read("banking_knowledge", object(), random.Random(0))
 
         self.assertEqual(len(variants), 1)
-        inserted = variants[0].calls[1]
+        calls = variants[0].calls
+        self.assertEqual(len(calls), len(gold) + 1)
+        self.assertEqual(sum(1 for call in calls if call.name == "unlock_discoverable_agent_tool"), 1)
+        inserted = calls[1]
         self.assertEqual(inserted.name, "call_discoverable_agent_tool")
         self.assertEqual(inserted.arguments["agent_tool_name"], "get_details")
         self.assertEqual(json.loads(inserted.arguments["arguments"]), {"account_id": "A1"})
         self.assertTrue(variants[0].inserted_in_gold)
+
+    def test_an_unseen_discoverable_read_gets_its_unlock_first(self):
+        gold = [Call("get_account", {"account_id": "A1"})]
+        plans = [("agent", "get_details", 1, {"account_id": "A1"})]
+        with mock.patch("preflight.relations.gold_calls", return_value=gold), mock.patch(
+            "preflight.relations._p1_plans", return_value=plans
+        ), mock.patch("preflight.relations._ran_cleanly", return_value=True):
+            variants = p1_extra_read("banking_knowledge", object(), random.Random(0))
+
+        self.assertEqual(len(variants), 1)
+        calls = variants[0].calls
+        self.assertEqual(len(calls), len(gold) + 2)
+        self.assertEqual(calls[1].name, "unlock_discoverable_agent_tool")
+        self.assertEqual(calls[1].arguments, {"agent_tool_name": "get_details"})
+        self.assertEqual(calls[2].name, "call_discoverable_agent_tool")
+        self.assertFalse(variants[0].inserted_in_gold)
 
 
 class P1Test(unittest.TestCase):
@@ -260,31 +267,29 @@ class P1Test(unittest.TestCase):
         for variant in self.variants:
             self.assertEqual(variant.relation, "P1")
             self.assertTrue(variant.expected_pass)
-            self.assertEqual(len(variant.calls), len(self.gold) + 1)
+            self.assertIn(len(variant.calls), (len(self.gold) + 1, len(self.gold) + 2))
             self.assertFalse(same_calls(variant.calls, self.gold))
 
     def test_inserted_call_runs_cleanly(self):
         if not self.variants:
             self.skipTest("no P1 candidate ran cleanly on this task")
         variant = self.variants[0]
-        positions = insertion_positions(self.gold, variant.calls)
         clean = []
-        for index in positions:
+        for index in read_positions(self.gold, variant.calls):
             try:
                 messages, _ = run(self.domain, self.task, list(variant.calls[: index + 1]))
             except Exception:
                 clean.append(False)
                 continue
             clean.append(bool(messages) and not tool_error(messages[-1]))
-        self.assertTrue(any(clean), f"no prefix through a possible inserted call ran cleanly: {positions}")
+        self.assertTrue(any(clean), "no prefix through a possible inserted call ran cleanly")
 
     def test_inserted_arguments_come_from_earlier_calls(self):
         if not self.variants:
             self.skipTest("no P1 candidate ran cleanly on this task")
         variant = self.variants[0]
-        positions = insertion_positions(self.gold, variant.calls)
         accepted = False
-        for index in positions:
+        for index in read_positions(self.gold, variant.calls):
             inserted = variant.calls[index]
             if inserted.name in NAME_KEY:
                 try:
@@ -295,11 +300,11 @@ class P1Test(unittest.TestCase):
                 inner = inserted.arguments
             if not isinstance(inner, dict):
                 continue
-            available = argument_name_values(self.gold[:index])
+            available = argument_name_values(variant.calls[:index])
             if all(canonical_json(value) in available.get(name, set()) for name, value in inner.items()):
                 accepted = True
                 break
-        self.assertTrue(accepted, f"inserted arguments were not filled from same-named earlier arguments: {positions}")
+        self.assertTrue(accepted, "inserted arguments were not filled from same-named earlier arguments")
 
     def test_same_seed_gives_the_same_variants(self):
         again, _ = variants_of("P1", self.domain, self.task)
@@ -388,14 +393,12 @@ class _HashEnv:
 
 class P5InertnessTest(unittest.TestCase):
     def _build(self, before, after):
-        domain = "airline"
-        task = object()
         gold = [Call("some_call", {})]
         responses = [([], _HashEnv(*before)), ([], _HashEnv(*after))]
         with mock.patch("preflight.relations.gold_calls", return_value=gold), mock.patch(
             "preflight.relations.run", side_effect=responses
         ):
-            return build_variants("P5", domain, task, random.Random(0))
+            return build_variants("P5", "airline", object(), random.Random(0))
 
     def test_inert_unknown_call_keeps_the_variant(self):
         variants, notes = self._build(("agent", "user"), ("agent", "user"))
