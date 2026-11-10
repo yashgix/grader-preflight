@@ -6,7 +6,7 @@ from unittest import mock
 
 import numpy as np
 
-from preflight import rl
+from preflight import mdp, rl
 from preflight.mdp import Action
 from preflight.rl import GradeCache, Policy, split, train
 from preflight.tau2_adapter import Call
@@ -33,6 +33,12 @@ class GradeCacheTest(unittest.TestCase):
         self.assertEqual(cache.cache(self.task, list(self.calls)), 1.0)
         self.assertEqual(cache.misses, 1)
         grader.assert_called_once_with("banking_knowledge", self.task, self.calls)
+
+    def test_instances_are_callable(self):
+        grader = mock.Mock(return_value=1.0)
+        cache = GradeCache("banking_knowledge", grade=grader)
+        self.assertEqual(cache(self.task, self.calls), 1.0)
+        self.assertEqual(cache.misses, 1)
 
     def test_a_grader_exception_is_an_error_cached_without_a_second_call(self):
         grader = mock.Mock(side_effect=RuntimeError("boom"))
@@ -109,24 +115,24 @@ class _ToyTask:
 
 def _win_actions():
     return [
-        Action("gold", (Call("win", {}),), 0, is_write=False),
-        Action("stop", (), None, is_write=False),
+        Action("gold", (Call("win", {}),), 0),
+        Action("stop", ()),
     ]
 
 
 def _read_actions():
     return [
-        Action("gold", (Call("win", {}),), 0, is_write=False),
-        Action("read", (Call("look", {}),), None, is_write=False),
-        Action("stop", (), None, is_write=False),
+        Action("gold", (Call("win", {}),), 0),
+        Action("read", (Call("look", {}),)),
+        Action("stop", ()),
     ]
 
 
 def _repeat_actions():
     return [
-        Action("gold", (Call("look", {}),), 0, is_write=False),
-        Action("read", (Call("look", {}),), None, is_write=False),
-        Action("stop", (), None, is_write=False),
+        Action("gold", (Call("look", {}),), 0),
+        Action("read", (Call("look", {}),)),
+        Action("stop", ()),
     ]
 
 
@@ -152,6 +158,9 @@ def _run_train(actions, steps, reward, episodes=20, seed=0, policy=None, task=No
 
 
 class TrainTest(unittest.TestCase):
+    def setUp(self):
+        mdp._WRITE_KEYS.clear()
+
     def test_a_rewarded_action_gets_more_likely(self):
         policy, records = _run_train(_win_actions(), 1, _win_reward, episodes=400)
         self.assertEqual(len(records), 400)

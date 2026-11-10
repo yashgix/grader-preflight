@@ -1,4 +1,4 @@
-"""Tests for the experiment runner: phase 1 compatibility and phase 2 dispatch."""
+"""Tests for the experiment runner: phase 1 compatibility and smoke dispatch."""
 
 import json
 import os
@@ -150,34 +150,11 @@ class ExperimentTest(unittest.TestCase):
             processes=1,
         )
 
-    def test_full_dispatches_to_the_full_sweep(self):
-        with mock.patch("preflight.phase2.run_full", return_value={"episodes": 2}) as full:
-            code = experiment.main(
-                [
-                    "--out",
-                    str(self.out),
-                    "--full",
-                    "--old-python",
-                    "oldpy",
-                    "--new-python",
-                    "newpy",
-                    "--seeds",
-                    "0",
-                    "--episodes",
-                    "100",
-                    "--processes",
-                    "2",
-                ]
-            )
-        self.assertEqual(code, 0)
-        full.assert_called_once_with(
-            out_path=Path(self.out),
-            old_python="oldpy",
-            new_python="newpy",
-            episodes=100,
-            seeds=(0,),
-            processes=2,
-        )
+    def test_full_flag_is_not_offered(self):
+        with mock.patch("preflight.phase2.run_smoke") as smoke:
+            with self.assertRaises(SystemExit):
+                experiment.main(["--out", str(self.out), "--full"])
+        smoke.assert_not_called()
 
     def test_unknown_phase_is_rejected(self):
         with self.assertRaises(SystemExit):

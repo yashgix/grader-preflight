@@ -1,4 +1,4 @@
-"""Run the preflight experiments: phase 1 relations, phase 2 smoke, or the full phase 2 sweep."""
+"""Run the preflight experiments: phase 1 relations, or the phase 2 smoke run."""
 
 import argparse
 import json
@@ -75,7 +75,7 @@ def run_smoke(
     seeds=None,
     processes: int = 4,
 ) -> dict:
-    """Phase 2 feasibility run: five train tasks, a few seeds, G_old and G_new."""
+    """Phase 2 smoke run: five train tasks, a few seeds, G_old and G_new."""
     from preflight.phase2 import run_smoke as phase2_run_smoke
 
     kwargs = {
@@ -91,30 +91,6 @@ def run_smoke(
     return phase2_run_smoke(**kwargs)
 
 
-def run_full(
-    out_path,
-    old_python: str = DEFAULT_OLD,
-    new_python: str = DEFAULT_NEW,
-    episodes: int | None = None,
-    seeds=None,
-    processes: int = 4,
-) -> dict:
-    """Phase 2 full sweep: tuned learner, all seeds, baselines and held-out evaluation."""
-    from preflight.phase2 import run_full as phase2_run_full
-
-    kwargs = {
-        "out_path": Path(out_path),
-        "old_python": old_python,
-        "new_python": new_python,
-        "processes": processes,
-    }
-    if episodes is not None:
-        kwargs["episodes"] = episodes
-    if seeds is not None:
-        kwargs["seeds"] = seeds
-    return phase2_run_full(**kwargs)
-
-
 def _parse_seeds(value):
     if value is None:
         return None
@@ -125,7 +101,6 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="experiment.py")
     parser.add_argument("--out", required=True)
     parser.add_argument("--phase", type=int, choices=(1, 2), default=2)
-    parser.add_argument("--full", action="store_true", help="run the full phase 2 sweep instead of the smoke run")
     parser.add_argument("--old-python", default=DEFAULT_OLD)
     parser.add_argument("--new-python", default=DEFAULT_NEW)
     parser.add_argument("--episodes", type=int, default=None)
@@ -141,24 +116,14 @@ def main(argv=None) -> int:
         run(out, args.old_python, args.new_python)
         return 0
     seeds = _parse_seeds(args.seeds)
-    if args.full:
-        run_full(
-            out,
-            old_python=args.old_python,
-            new_python=args.new_python,
-            episodes=args.episodes,
-            seeds=seeds,
-            processes=args.processes,
-        )
-    else:
-        run_smoke(
-            out,
-            old_python=args.old_python,
-            new_python=args.new_python,
-            episodes=args.episodes,
-            seeds=seeds,
-            processes=args.processes,
-        )
+    run_smoke(
+        out,
+        old_python=args.old_python,
+        new_python=args.new_python,
+        episodes=args.episodes,
+        seeds=seeds,
+        processes=args.processes,
+    )
     return 0
 
 

@@ -15,7 +15,7 @@ import numpy as np
 from preflight import report
 from preflight.mdp import allowed, horizon, oracle, order_ok, task_actions, trajectory
 from preflight.relations import _inner_name, calls_as_dicts
-from preflight.rl import DEFAULT_LR, N_FEATURES, GradeCache, Policy, _episode, _gold_names, split, train
+from preflight.rl import DEFAULT_LR, N_FEATURES, GradeCache, Policy, _gold_names, split, train
 from preflight.tau2_adapter import Call, tasks
 
 DOMAIN = 'banking_knowledge'
@@ -24,10 +24,7 @@ POOL_PATH = REPO_ROOT / 'data' / 'banking_pool.json'
 DEFAULT_OLD = '/Users/Shared/arcturus-exec/envs/tau2-pre-py312/bin/python'
 DEFAULT_NEW = '/Users/Shared/arcturus-exec/envs/tau2-v101-py312/bin/python'
 SMOKE_SEEDS = (0, 1, 2)
-FULL_SEEDS = tuple(range(10))
 SMOKE_EPISODES = 2000
-FULL_EPISODES = 3000
-HELDOUT_EPISODES = 100
 SPLIT_SEED = 20261110
 
 
@@ -84,7 +81,7 @@ def _task_ids_from_arg(value):
 
 
 def _worker_args(condition, mode, out_path, episodes, seed, task_ids, domain=DOMAIN, lr=DEFAULT_LR,
-                 input_path=None, episodes_per_task=None):
+                 input_path=None):
     args = [
         '--condition', condition,
         '--mode', mode,
@@ -97,8 +94,6 @@ def _worker_args(condition, mode, out_path, episodes, seed, task_ids, domain=DOM
     ]
     if input_path is not None:
         args.extend(['--in', str(input_path)])
-    if episodes_per_task is not None:
-        args.extend(['--episodes-per-task', str(episodes_per_task)])
     return args
 
 
@@ -267,7 +262,7 @@ def train_run(condition, seed, task_ids, episodes, out_path, domain=DOMAIN, lr=D
     def reward_fn(task, calls):
         return _condition_reward(condition, cache, task, calls)
 
-    policy = Policy(N_FEATURES, lr=lr) if float(lr) != float(DEFAULT_LR) else None
+    policy = Policy(N_FEATURES, lr=lr)
     policy, records = train(domain, task_list, seed=seed, episodes=episodes, reward_fn=reward_fn, policy=policy)
     by_id = {task.id: task for task in task_list}
     actions_by_id = {task.id: task_actions(domain, task) for task in task_list}
@@ -304,56 +299,6 @@ def random_run(condition, seed, task_ids, episodes, out_path, domain=DOMAIN):
         )
     seconds = time.perf_counter() - started
     payload = _run_payload(condition, seed, domain, task_ids, episodes, records, cache, seconds, mode='random')
-    _write_json(out_path, payload)
-    return payload
-
-
-def baseline_run(mode, seed, task_ids, out_path, domain=DOMAIN):
-    started = time.perf_counter()
-    task_list = _task_list(domain, task_ids)
-    if not task_list:
-        raise ValueError('no tasks')
-    cache = GradeCache(domain)
-    records = []
-    for task in task_list:
-        actions = task_actions(domain, task)
-        if mode == 'gold':
-            made = [index for index, action in enumerate(actions) if action.kind == 'gold']
-        else:
-            made = [index for index, action in enumerate(actions) if action.kind == 'stop'][:1]
-        calls = trajectory(actions, made)
-        value = _condition_reward('new', cache, task, calls)
-        raw = _new_reward('new', cache, task, calls)
-        records.append(_episode_payload(task, actions, made, value, value is None, raw, _extra_reads(actions, made)))
-    seconds = time.perf_counter() - started
-    payload = _run_payload('new', seed, domain, task_ids, len(task_list), records, cache, seconds, mode=mode)
-    _write_json(out_path, payload)
-    return payload
-
-
-def eval_run(condition, seed, task_ids, episodes_per_task, input_path, out_path, domain=DOMAIN):
-    started = time.perf_counter()
-    source = _read_json(input_path)
-    policy = _policy_from_payload(source.get('policy'))
-    task_list = _task_list(domain, task_ids)
-    cache = GradeCache(domain)
-    rng = random.Random(f'{seed}:eval:{condition}')
-    records = []
-    for task in task_list:
-        actions = task_actions(domain, task)
-        steps = horizon(task)
-        gold_names = _gold_names(actions)
-        for _ in range(episodes_per_task):
-            made, _, extra = _episode(policy, rng, task, actions, steps, gold_names)
-            calls = trajectory(actions, made)
-            value = _condition_reward(condition, cache, task, calls)
-            raw = _new_reward(condition, cache, task, calls)
-            pending = condition == 'old' and raw is None
-            records.append(_episode_payload(task, actions, made, value, value is None, raw, extra, pending))
-    seconds = time.perf_counter() - started
-    payload = _run_payload(
-        condition, seed, domain, task_ids, len(records), records, cache, seconds, mode='eval'
-    )
     _write_json(out_path, payload)
     return payload
 
@@ -399,38 +344,6 @@ def _parallel_map(function, items, processes):
         return list(pool.map(function, items))
 
 
-def _last_true_success(run, count):
-    episodes = run.get('episodes', [])[-count:]
-    if not episodes:
-        return 0.0
-    return sum(1.0 if episode.get('true_success') else 0.0 for episode in episodes) / len(episodes)
-
-
-def _tuning_check(new_python, run_dir):
-    try:
-        retail = [task.id for task in tasks('retail')[:5]]
-    except Exception:
-        return DEFAULT_LR
-    if not retail:
-        return DEFAULT_LR
-    best_lr = DEFAULT_LR
-    best_score = -1.0
-    for lr in (0.05, 0.1, 0.2):
-        path = run_dir / f'tune_lr{lr}.json'
-        try:
-            _run_worker(
-                new_python,
-                _worker_args('new', 'train', path, 200, 0, retail, domain='retail', lr=lr),
-            )
-            score = _last_true_success(_read_json(path), 50)
-        except Exception:
-            continue
-        if score > best_score:
-            best_score = score
-            best_lr = lr
-    return best_lr
-
-
 def run_smoke(out_path, old_python=DEFAULT_OLD, new_python=DEFAULT_NEW, episodes=SMOKE_EPISODES,
               seeds=SMOKE_SEEDS, limit=5, processes=4):
     out_path = Path(out_path).resolve()
@@ -461,106 +374,19 @@ def run_smoke(out_path, old_python=DEFAULT_OLD, new_python=DEFAULT_NEW, episodes
     random_runs = [_read_json(pair[2]) for pair in pairs]
     runs = old_runs + new_runs
     metrics = report.smoke_metrics(runs, random_runs, episodes=episodes)
-    report.write_report(folder / 'report.md', runs, random_runs, metrics=metrics, full=False)
-    report.write_metrics(out_path, metrics)
-    return metrics
-
-
-def run_full(out_path, old_python=DEFAULT_OLD, new_python=DEFAULT_NEW, episodes=FULL_EPISODES,
-             seeds=FULL_SEEDS, processes=4):
-    out_path = Path(out_path).resolve()
-    folder = out_path.parent
-    folder.mkdir(parents=True, exist_ok=True)
-    ids = pool_ids()
-    train_ids, held_out = ensure_split(folder, ids)
-    run_dir = folder / 'runs'
-    heldout_dir = folder / 'heldout'
-    run_dir.mkdir(parents=True, exist_ok=True)
-    heldout_dir.mkdir(parents=True, exist_ok=True)
-    lr = _tuning_check(new_python, run_dir)
-
-    def one(seed):
-        old_path = run_dir / f'old_seed{seed}.json'
-        new_path = run_dir / f'new_seed{seed}.json'
-        proc_path = run_dir / f'proc_seed{seed}.json'
-        random_path = run_dir / f'random_seed{seed}.json'
-        old_held = heldout_dir / f'old_seed{seed}.json'
-        new_held = heldout_dir / f'new_seed{seed}.json'
-        proc_held = heldout_dir / f'proc_seed{seed}.json'
-        _run_worker(old_python, _worker_args('old', 'train', old_path, episodes, seed, train_ids, lr=lr))
-        _run_worker(
-            new_python,
-            _worker_args('new', 'oracle', old_path, episodes, seed, train_ids, input_path=old_path),
-        )
-        _run_worker(new_python, _worker_args('new', 'train', new_path, episodes, seed, train_ids, lr=lr))
-        _run_worker(new_python, _worker_args('proc', 'train', proc_path, episodes, seed, train_ids, lr=lr))
-        _run_worker(
-            old_python,
-            _worker_args(
-                'old', 'eval', old_held, len(held_out) * HELDOUT_EPISODES, seed, held_out,
-                lr=lr, input_path=old_path, episodes_per_task=HELDOUT_EPISODES,
-            ),
-        )
-        _run_worker(
-            new_python,
-            _worker_args(
-                'new', 'oracle', old_held, len(held_out) * HELDOUT_EPISODES, seed, held_out,
-                input_path=old_held,
-            ),
-        )
-        _run_worker(
-            new_python,
-            _worker_args(
-                'new', 'eval', new_held, len(held_out) * HELDOUT_EPISODES, seed, held_out,
-                lr=lr, input_path=new_path, episodes_per_task=HELDOUT_EPISODES,
-            ),
-        )
-        _run_worker(
-            new_python,
-            _worker_args(
-                'proc', 'eval', proc_held, len(held_out) * HELDOUT_EPISODES, seed, held_out,
-                lr=lr, input_path=proc_path, episodes_per_task=HELDOUT_EPISODES,
-            ),
-        )
-        _run_worker(new_python, _worker_args('new', 'random', random_path, episodes, seed, train_ids))
-        return old_path, new_path, proc_path, random_path, old_held, new_held, proc_held
-
-    pairs = _parallel_map(one, seeds, processes)
-    runs = []
-    heldout_runs = []
-    random_runs = []
-    for pair in pairs:
-        runs.extend([_read_json(pair[0]), _read_json(pair[1]), _read_json(pair[2])])
-        heldout_runs.extend([_read_json(pair[4]), _read_json(pair[5]), _read_json(pair[6])])
-        random_runs.append(_read_json(pair[3]))
-    gold_path = run_dir / 'gold.json'
-    empty_path = run_dir / 'empty.json'
-    _run_worker(
-        new_python,
-        _worker_args('new', 'gold', gold_path, len(train_ids), 0, train_ids),
-    )
-    _run_worker(
-        new_python,
-        _worker_args('new', 'empty', empty_path, len(train_ids), 0, train_ids),
-    )
-    gold_runs = [_read_json(gold_path)]
-    empty_runs = [_read_json(empty_path)]
-    metrics = report.full_metrics(runs, random_runs, gold_runs, empty_runs, heldout_runs, episodes=episodes)
-    report.write_report(
-        folder / 'report.md', runs, random_runs, gold_runs, empty_runs, heldout_runs, metrics=metrics, full=True
-    )
+    per_task = report.per_task_probabilities(runs, domain=DOMAIN)
+    report.write_report(folder / 'report.md', runs, random_runs, metrics=metrics, per_task=per_task, full=False)
     report.write_metrics(out_path, metrics)
     return metrics
 
 
 smoke = run_smoke
-full = run_full
 
 
 def _worker_main(argv):
     parser = argparse.ArgumentParser(prog='python -m preflight.phase2 worker')
     parser.add_argument('--condition', choices=('old', 'new', 'proc'), default='new')
-    parser.add_argument('--mode', choices=('train', 'random', 'gold', 'empty', 'eval', 'oracle'), default='train')
+    parser.add_argument('--mode', choices=('train', 'random', 'oracle'), default='train')
     parser.add_argument('--out', required=True)
     parser.add_argument('--in', dest='input', default=None)
     parser.add_argument('--episodes', type=int, default=SMOKE_EPISODES)
@@ -568,21 +394,14 @@ def _worker_main(argv):
     parser.add_argument('--task-ids', default='')
     parser.add_argument('--domain', default=DOMAIN)
     parser.add_argument('--lr', type=float, default=DEFAULT_LR)
-    parser.add_argument('--episodes-per-task', type=int, default=HELDOUT_EPISODES)
     args = parser.parse_args(argv)
     task_ids = _task_ids_from_arg(args.task_ids)
-    if not task_ids and args.mode in ('train', 'random', 'gold', 'empty', 'eval'):
+    if not task_ids and args.mode in ('train', 'random'):
         task_ids = pool_ids()
     if args.mode == 'train':
         train_run(args.condition, args.seed, task_ids, args.episodes, args.out, args.domain, args.lr)
     elif args.mode == 'random':
         random_run(args.condition, args.seed, task_ids, args.episodes, args.out, args.domain)
-    elif args.mode in ('gold', 'empty'):
-        baseline_run(args.mode, args.seed, task_ids, args.out, args.domain)
-    elif args.mode == 'eval':
-        eval_run(
-            args.condition, args.seed, task_ids, args.episodes_per_task, args.input, args.out, args.domain
-        )
     else:
         oracle_fill(args.input or args.out, args.out, args.domain)
     return 0
@@ -600,35 +419,22 @@ def main(argv=None):
         return _worker_main(argv[1:])
     parser = argparse.ArgumentParser(prog='python -m preflight.phase2')
     parser.add_argument('--out', required=True)
-    parser.add_argument('--full', action='store_true')
     parser.add_argument('--old-python', default=DEFAULT_OLD)
     parser.add_argument('--new-python', default=DEFAULT_NEW)
     parser.add_argument('--episodes', type=int, default=None)
     parser.add_argument('--seeds', default=None)
     parser.add_argument('--processes', type=int, default=4)
     args = parser.parse_args(argv)
-    episodes = args.episodes
-    if episodes is None:
-        episodes = FULL_EPISODES if args.full else SMOKE_EPISODES
-    seeds = _parse_seeds(args.seeds, FULL_SEEDS if args.full else SMOKE_SEEDS)
-    if args.full:
-        full(
-            args.out,
-            old_python=args.old_python,
-            new_python=args.new_python,
-            episodes=episodes,
-            seeds=seeds,
-            processes=args.processes,
-        )
-    else:
-        smoke(
-            args.out,
-            old_python=args.old_python,
-            new_python=args.new_python,
-            episodes=episodes,
-            seeds=seeds,
-            processes=args.processes,
-        )
+    episodes = args.episodes if args.episodes is not None else SMOKE_EPISODES
+    seeds = _parse_seeds(args.seeds, SMOKE_SEEDS)
+    smoke(
+        args.out,
+        old_python=args.old_python,
+        new_python=args.new_python,
+        episodes=episodes,
+        seeds=seeds,
+        processes=args.processes,
+    )
     return 0
 
 

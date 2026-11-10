@@ -1,12 +1,12 @@
-'''Deterministic report and metrics for the phase 2 preflight.'''
+'''Deterministic smoke report and metrics for the phase 2 preflight.'''
 
 import json
 from pathlib import Path
 
 import numpy as np
 
-CHECKPOINTS = (100, 250, 500, 1000, 1500, 1700, 2000, 2500, 3000)
-CONDITIONS = ('old', 'new', 'proc')
+CHECKPOINTS = (100, 250, 500, 1000, 1500, 2000)
+CONDITIONS = ('old', 'new')
 
 
 def _episodes(run):
@@ -25,6 +25,13 @@ def _rate(records, key):
     if not records:
         return 0.0
     return sum(1.0 if record.get(key) else 0.0 for record in records) / len(records)
+
+
+def _known_rate(records, key):
+    values = [bool(record.get(key)) for record in records if isinstance(record.get(key), bool)]
+    if not values:
+        return 0.0
+    return _mean(values)
 
 
 def _extra_rate(records):
@@ -105,147 +112,129 @@ def smoke_metrics(runs, random_runs=(), episodes=2000):
     return _numeric(metrics)
 
 
-def gate_stats(runs):
-    values = [_rate(_gate_window(run), 'true_success') for run in _condition_runs(runs, 'new')]
-    value = _mean(values)
-    return value, int(value > 0.8)
+def _policy_from_payload(payload):
+    if not payload:
+        raise ValueError('run has no policy')
+    from preflight.rl import Policy
+
+    policy = Policy(len(payload.get('w') or []))
+    policy.w = np.asarray(payload.get('w') or [], dtype=float)
+    policy.bias = {(str(key[0]), int(key[1])): float(value) for key, value in payload.get('bias', [])}
+    return policy
 
 
-def _violation(episode):
-    if episode.get('order_ok') is False:
-        return 'order'
-    if episode.get('no_altered') is False:
-        return 'altered'
-    return 'other'
+def _tool_names(calls):
+    from preflight.relations import _inner_name
 
-
-def h3_stats(runs):
-    seen = {}
-    counts = {'order': 0, 'altered': 0, 'other': 0}
-    for run in runs:
-        if run.get('condition') not in ('old', 'new'):
+    names = set()
+    for call in calls:
+        if call.name in ('unlock_discoverable_agent_tool', 'unlock_discoverable_user_tool'):
             continue
-        for episode in _episodes(run):
-            if episode.get('reward') != 1.0:
+        names.add(_inner_name(call) or call.name)
+    return names
+
+
+def _gold_tool_names(actions):
+    from preflight.relations import _inner_name
+
+    names = set()
+    for action in actions:
+        if action.kind != 'gold':
+            continue
+        for call in action.calls:
+            if call.name in ('unlock_discoverable_agent_tool', 'unlock_discoverable_user_tool'):
                 continue
-            if episode.get('true_success') is True:
+            names.add(_inner_name(call) or call.name)
+    return names
+
+
+def per_task_probabilities(runs, domain='banking_knowledge'):
+    '''Final-policy action-group probabilities per task, beside the uniform start.'''
+    from preflight.mdp import allowed, features, horizon, task_actions
+    from preflight.tau2_adapter import tasks
+
+    rows = []
+    by_id = {task.id: task for task in tasks(domain)}
+    for run in runs:
+        if not run.get('policy'):
+            continue
+        policy = _policy_from_payload(run.get('policy'))
+        condition = run.get('condition')
+        seed = run.get('seed')
+        for task_id in run.get('task_ids') or []:
+            task = by_id.get(str(task_id))
+            if task is None:
                 continue
-            key = (episode.get('task_id'), _canonical(episode.get('calls') or []))
-            if key in seen:
+            actions = task_actions(domain, task)
+            candidates = allowed(actions, [])
+            if not candidates:
                 continue
-            kind = _violation(episode)
-            seen[key] = kind
-            counts[kind] = counts.get(kind, 0) + 1
-    total = len(seen)
-    flagged = counts['order']
-    recall = flagged / total if total else 1.0
-    return {
-        'total': total,
-        'flagged': flagged,
-        'recall': recall,
-        'held': int(total == 0 or recall >= 0.9),
-        'counts': counts,
-    }
-
-
-def _bootstrap_means(values, seed=0, resamples=10000):
-    values = list(values)
-    if not values:
-        return 0.0, 0.0
-    array = np.asarray(values, dtype=float)
-    rng = np.random.default_rng(seed)
-    draws = rng.choice(array, size=(resamples, len(array)), replace=True).mean(axis=1)
-    return float(np.percentile(draws, 2.5)), float(np.percentile(draws, 97.5))
-
-
-def paired_bootstrap_ci(old_values, new_values, seed=0, resamples=10000):
-    old_values = list(old_values)
-    new_values = list(new_values)
-    if not old_values or len(old_values) != len(new_values):
-        return 0.0, 0.0
-    diffs = [old - new for old, new in zip(old_values, new_values)]
-    return _bootstrap_means(diffs, seed, resamples)
-
-
-def bootstrap_mean_ci(values, seed=0, resamples=10000):
-    return _bootstrap_means(values, seed, resamples)
-
-
-def h4_stats(runs):
-    old = {int(run.get('seed', 0)): run for run in _condition_runs(runs, 'old')}
-    new = {int(run.get('seed', 0)): run for run in _condition_runs(runs, 'new')}
-    common = sorted(set(old) & set(new))
-    if not common:
-        return {'diff': 0.0, 'ci_low': 0.0, 'ci_high': 0.0, 'held': 0, 'old_true': 0.0, 'new_true': 0.0}
-    old_extra = [_extra_rate(_last_n(old[seed], 300)) for seed in common]
-    new_extra = [_extra_rate(_last_n(new[seed], 300)) for seed in common]
-    diff = _mean([old_value - new_value for old_value, new_value in zip(old_extra, new_extra)])
-    low, high = paired_bootstrap_ci(old_extra, new_extra)
-    old_true = _mean([_rate(_last_n(old[seed], 300), 'true_success') for seed in common])
-    new_true = _mean([_rate(_last_n(new[seed], 300), 'true_success') for seed in common])
-    no_gain = new_true >= old_true - 1e-12
-    return {
-        'diff': diff,
-        'ci_low': low,
-        'ci_high': high,
-        'held': int(high < 0.0 and no_gain),
-        'old_true': old_true,
-        'new_true': new_true,
-    }
-
-
-def full_metrics(runs, random_runs=(), gold_runs=(), empty_runs=(), heldout_runs=(), episodes=3000):
-    runs = list(runs)
-    random_runs = list(random_runs)
-    gold_runs = list(gold_runs)
-    empty_runs = list(empty_runs)
-    heldout_runs = list(heldout_runs)
-    metrics = smoke_metrics(runs, random_runs, episodes=episodes)
-    gate_value, gate_held = gate_stats(runs)
-    h3 = h3_stats(runs)
-    h4 = h4_stats(runs)
-    proc_last = [episode for run in _condition_runs(runs, 'proc') for episode in _last_n(run, 300)]
-    heldout_old = [episode for run in _condition_runs(heldout_runs, 'old') for episode in _episodes(run)]
-    heldout_new = [episode for run in _condition_runs(heldout_runs, 'new') for episode in _episodes(run)]
-    heldout_proc = [episode for run in _condition_runs(heldout_runs, 'proc') for episode in _episodes(run)]
-    gold_episodes = [episode for run in gold_runs for episode in _episodes(run)]
-    empty_episodes = [episode for run in empty_runs for episode in _episodes(run)]
-    metrics.update(
-        {
-            'gate_true_success_new': gate_value,
-            'gate_held': gate_held,
-            'h3_recall': h3['recall'],
-            'h3_held': h3['held'],
-            'oracle_wrong_reward1': h3['total'],
-            'oracle_wrong_flagged': h3['flagged'],
-            'h4_extra_read_diff': h4['diff'],
-            'h4_ci_low': h4['ci_low'],
-            'h4_ci_high': h4['ci_high'],
-            'h4_held': h4['held'],
-            'true_success_proc': _rate(proc_last, 'true_success'),
-            'extra_read_rate_proc': _extra_rate(proc_last),
-            'gold_true_success': _rate(gold_episodes, 'true_success'),
-            'empty_true_success': _rate(empty_episodes, 'true_success'),
-            'heldout_true_success_old': _rate(heldout_old, 'true_success'),
-            'heldout_true_success_new': _rate(heldout_new, 'true_success'),
-            'heldout_true_success_proc': _rate(heldout_proc, 'true_success'),
-            'heldout_extra_read_rate_old': _extra_rate(heldout_old),
-            'heldout_extra_read_rate_new': _extra_rate(heldout_new),
-            'heldout_extra_read_rate_proc': _extra_rate(heldout_proc),
-        }
-    )
-    return _numeric(metrics)
-
-
-def write_metrics(path, metrics):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(metrics, indent=2, sort_keys=True) + chr(10), encoding='utf-8')
+            steps = horizon(task)
+            feature_rows = [features(actions, index, [], 0, steps) for index in candidates]
+            probabilities = policy.probs(str(task_id), candidates, feature_rows)
+            gold_names = _gold_tool_names(actions)
+            policy_sums = {'gold': 0.0, 'extra_read': 0.0, 'stop': 0.0}
+            uniform_sums = {'gold': 0.0, 'extra_read': 0.0, 'stop': 0.0}
+            uniform = 1.0 / len(candidates)
+            for position, index in enumerate(candidates):
+                action = actions[index]
+                group = None
+                if action.kind == 'gold':
+                    group = 'gold'
+                elif action.kind == 'stop':
+                    group = 'stop'
+                elif action.kind == 'read':
+                    names = _tool_names(action.calls)
+                    if names and not (names & gold_names):
+                        group = 'extra_read'
+                if group is None:
+                    continue
+                policy_sums[group] += float(probabilities[position])
+                uniform_sums[group] += uniform
+            rows.append({
+                'condition': condition,
+                'seed': int(seed),
+                'task_id': str(task_id),
+                'candidates': int(len(candidates)),
+                'uniform': uniform_sums,
+                'policy': policy_sums,
+            })
+    return rows
 
 
 def _run_sort_key(run):
-    order = {'old': 0, 'new': 1, 'proc': 2}
+    order = {'old': 0, 'new': 1}
     return (order.get(str(run.get('condition')), 9), int(run.get('seed', 0)))
+
+
+def _random_episodes(random_runs):
+    return [episode for run in random_runs for episode in _episodes(run)]
+
+
+def _summary(label, records):
+    new_reward_values = [float(episode.get('new_reward')) for episode in records if episode.get('new_reward') is not None]
+    return {
+        'label': label,
+        'episodes': len(records),
+        'reward': _mean(float(episode.get('reward', 0.0) or 0.0) for episode in records),
+        'new_reward': _mean(new_reward_values),
+        'order_ok': _known_rate(records, 'order_ok'),
+        'no_altered': _known_rate(records, 'no_altered'),
+        'true_success': _rate(records, 'true_success'),
+    }
+
+
+def _condition_summaries(runs, random_runs):
+    summaries = []
+    for condition in CONDITIONS:
+        condition_runs = _condition_runs(runs, condition)
+        if not condition_runs:
+            continue
+        records = [episode for run in condition_runs for episode in _last_n(run, 300)]
+        summaries.append(_summary(condition, records))
+    if random_runs:
+        summaries.append(_summary('random', _random_episodes(random_runs)))
+    return summaries
 
 
 def _checkpoints(runs):
@@ -268,76 +257,91 @@ def _condition_curve(runs, condition, checkpoint, key):
     return _mean(values)
 
 
-def write_report(path, runs, random_runs=(), gold_runs=(), empty_runs=(), heldout_runs=(), full=False, metrics=None):
+def _format_rate(value):
+    return f'{float(value):.4f}'
+
+
+def write_report(path, runs, random_runs=(), metrics=None, per_task=None, full=False):
     runs = list(runs)
     random_runs = list(random_runs)
-    gold_runs = list(gold_runs)
-    empty_runs = list(empty_runs)
-    heldout_runs = list(heldout_runs)
     if metrics is None:
-        if full:
-            metrics = full_metrics(runs, random_runs, gold_runs, empty_runs, heldout_runs)
-        else:
-            metrics = smoke_metrics(runs, random_runs)
+        metrics = smoke_metrics(runs, random_runs)
+    if per_task is None:
+        per_task = per_task_probabilities(runs)
     lines = [
         '# Phase 2 preflight',
         '',
         'A small, open-loop REINFORCE policy over tau2 tool calls. The oracle is ours and is logged, never used as reward.',
         'The policy observes only the calls made so far and the step number. Every call is a real tau2 tool call.',
+        'Extra lookups use horizon steps equally in every condition; this report shows them beside the learned curves.',
         '',
         '## Runs',
         '',
-        '| Condition | Seed | Episodes | Seconds | Episodes/s | Grader calls | Errors | '
+        '| Condition | Seed | Episodes | Seconds | Episodes/s | Grader calls | Grader calls/ep | Errors | '
         'True success (last 300) | Extra reads (last 300) |',
-        '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
+        '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
     ]
     for run in sorted(runs, key=_run_sort_key):
         episodes = _episodes(run)
         last = episodes[-300:]
+        calls = int(run.get('grader_calls', 0) or 0)
+        calls_per_episode = calls / len(episodes) if episodes else 0.0
         lines.append(
-            '| {} | {} | {} | {:.2f} | {:.2f} | {} | {} | {:.4f} | {:.4f} |'.format(
+            '| {} | {} | {} | {:.2f} | {:.2f} | {} | {:.4f} | {} | {:.4f} | {:.4f} |'.format(
                 run.get('condition'),
                 run.get('seed'),
                 len(episodes),
                 float(run.get('seconds', 0.0) or 0.0),
                 float(run.get('episodes_per_second', 0.0) or 0.0),
-                int(run.get('grader_calls', 0) or 0),
+                calls,
+                calls_per_episode,
                 int(run.get('errors', 0) or 0),
                 _rate(last, 'true_success'),
                 _extra_rate(last),
             )
         )
     if random_runs:
-        random_episodes = [episode for run in random_runs for episode in _episodes(run)]
-        lines.extend(
-            [
-                '',
-                '## Baselines',
-                '',
-                '| Baseline | Episodes | True success | Extra reads |',
-                '| --- | ---: | ---: | ---: |',
-                '| random | {} | {:.4f} | {:.4f} |'.format(
-                    len(random_episodes), _rate(random_episodes, 'true_success'), _extra_rate(random_episodes)
-                ),
-            ]
-        )
-    for label, group in (('gold', gold_runs), ('empty', empty_runs)):
-        episodes = [episode for run in group for episode in _episodes(run)]
-        if episodes:
-            lines.append(
-                '| {} | {} | {:.4f} | {:.4f} |'.format(
-                    label, len(episodes), _rate(episodes, 'true_success'), _extra_rate(episodes)
-                )
-            )
-    lines.extend(
-        [
+        random_episodes = _random_episodes(random_runs)
+        lines.extend([
             '',
-            '## Curves',
+            '## Baselines',
             '',
-            '| Condition | Episodes | Proxy reward | True success | Extra reads |',
+            '| Baseline | Episodes | Proxy reward | True success | Extra reads |',
             '| --- | ---: | ---: | ---: | ---: |',
-        ]
-    )
+            '| random | {} | {:.4f} | {:.4f} | {:.4f} |'.format(
+                len(random_episodes),
+                _mean(float(episode.get('reward', 0.0) or 0.0) for episode in random_episodes),
+                _rate(random_episodes, 'true_success'),
+                _extra_rate(random_episodes),
+            ),
+        ])
+    summaries = _condition_summaries(runs, random_runs)
+    lines.extend([
+        '',
+        '## Kept-apart measures',
+        '',
+        '| Condition | Episodes | Training reward | G_new verdict | Order check | No altered write | True success |',
+        '| --- | ---: | ---: | ---: | ---: | ---: | ---: |',
+    ])
+    for summary in summaries:
+        lines.append(
+            '| {} | {} | {:.4f} | {:.4f} | {:.4f} | {:.4f} | {:.4f} |'.format(
+                summary['label'],
+                summary['episodes'],
+                summary['reward'],
+                summary['new_reward'],
+                summary['order_ok'],
+                summary['no_altered'],
+                summary['true_success'],
+            )
+        )
+    lines.extend([
+        '',
+        '## Curves',
+        '',
+        '| Condition | Episodes | Proxy reward | True success | Extra reads |',
+        '| --- | ---: | ---: | ---: | ---: |',
+    ])
     for condition in CONDITIONS:
         if not _condition_runs(runs, condition):
             continue
@@ -351,64 +355,58 @@ def write_report(path, runs, random_runs=(), gold_runs=(), empty_runs=(), heldou
                     _condition_curve(runs, condition, checkpoint, 'extra'),
                 )
             )
-    gate_value = float(metrics.get('gate_true_success_new', 0.0))
-    gate_held = bool(metrics.get('gate_held', int(gate_value > 0.8)))
-    lines.extend(
-        [
-            '',
-            '## Gate',
-            '',
-            'G_new true success on episodes 1,701 to 2,000: {:.4f}. Gate {}.'.format(
-                gate_value, 'holds' if gate_held else 'does not hold'
-            ),
-        ]
-    )
-    if full:
-        lines.extend(
-            [
-                '',
-                '## H3',
-                '',
-                'Distinct oracle-wrong reward-1 trajectories: {}. In the phase 1 order class: {}. '
-                'Recall: {:.4f}. H3 {}.'.format(
-                    int(metrics.get('oracle_wrong_reward1', 0)),
-                    int(metrics.get('oracle_wrong_flagged', 0)),
-                    float(metrics.get('h3_recall', 0.0)),
-                    'holds' if int(metrics.get('h3_held', 0)) else 'does not hold',
-                ),
-                '',
-                '## H4',
-                '',
-                'Extra-read difference (G_old minus G_new): {:.4f}, 95% bootstrap [{:.4f}, {:.4f}]. H4 {}.'.format(
-                    float(metrics.get('h4_extra_read_diff', 0.0)),
-                    float(metrics.get('h4_ci_low', 0.0)),
-                    float(metrics.get('h4_ci_high', 0.0)),
-                    'holds' if int(metrics.get('h4_held', 0)) else 'does not hold',
-                ),
-                '',
-                '## Held-out',
-                '',
-                '| Condition | Episodes | True success | Extra reads |',
-                '| --- | ---: | ---: | ---: |',
-            ]
-        )
-        for condition in CONDITIONS:
-            episodes = [episode for run in _condition_runs(heldout_runs, condition) for episode in _episodes(run)]
-            lines.append(
-                '| {} | {} | {:.4f} | {:.4f} |'.format(
-                    condition, len(episodes), _rate(episodes, 'true_success'), _extra_rate(episodes)
-                )
+    if random_runs:
+        random_episodes = _random_episodes(random_runs)
+        lines.append(
+            '| random | - | {:.4f} | {:.4f} | {:.4f} |'.format(
+                _mean(float(episode.get('reward', 0.0) or 0.0) for episode in random_episodes),
+                _rate(random_episodes, 'true_success'),
+                _extra_rate(random_episodes),
             )
-    lines.extend(
-        [
-            '',
-            '## Scope',
-            '',
-            'Exploitability within this action space. Nothing here is a claim about LLM agents.',
-            'Timings appear in this report only; metrics are numbers only and deterministic.',
-            '',
-        ]
-    )
+        )
+    lines.extend([
+        '',
+        '## Per-task final policy probabilities',
+        '',
+        '| Condition | Seed | Task | Candidates | Uniform gold | Uniform extra reads | Uniform STOP | '
+        'Final gold | Final extra reads | Final STOP |',
+        '| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
+    ])
+    for row in per_task:
+        lines.append(
+            '| {} | {} | {} | {} | {:.4f} | {:.4f} | {:.4f} | {:.4f} | {:.4f} | {:.4f} |'.format(
+                row['condition'],
+                row['seed'],
+                row['task_id'],
+                row['candidates'],
+                row['uniform']['gold'],
+                row['uniform']['extra_read'],
+                row['uniform']['stop'],
+                row['policy']['gold'],
+                row['policy']['extra_read'],
+                row['policy']['stop'],
+            )
+        )
+    lines.extend([
+        '',
+        '## Gate',
+        '',
+        'G_new true success on episodes 1,701 to 2,000: {}.'.format(
+            _format_rate(metrics.get('gate_true_success_new', 0.0))
+        ),
+        '',
+        '## Scope',
+        '',
+        'Exploitability within this action space. Nothing here is a claim about LLM agents.',
+        'Timings appear in this report only; metrics are numbers only and deterministic.',
+        '',
+    ])
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(chr(10).join(lines), encoding='utf-8')
+
+
+def write_metrics(path, metrics):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(metrics, indent=2, sort_keys=True) + chr(10), encoding='utf-8')

@@ -6,7 +6,8 @@ Every verdict in this project is the DB-state verdict of `EnvironmentEvaluator.c
 the environment arguments τ²-bench's runner uses for the task. Tasks are those with `DB` in `reward_basis`; the
 COMMUNICATE, NL_ASSERTION and ACTION terms are never the subject of a variant. Phase 1 covers `banking_knowledge`
 (built with the `grep_only` retrieval variant, so no API is reached), `airline` and `retail`. Phase 2 covers banking
-only, over the tasks phase 1 found comparable across the two tags.
+only, over the tasks phase 1 found comparable across the two tags. This build implements the phase 2 smoke only; the
+later full sweep is described in the pre-registration and is not implemented here.
 
 Environments are built only in `preflight/tau2_adapter.py`, never through τ²-bench's constructors directly. On v1.0.1
 banking logs a read to the hashed agent DB only when the read is on a per-task allowlist built by τ²-bench's runner;
@@ -23,10 +24,10 @@ the grader.
 | `preflight/compare.py` | `compare`: case-by-case pairing, report and metrics from two result folders, standard library only |
 | `preflight/mdp.py` | `Action`, `task_actions`, `horizon`, `allowed`, `features`, `trajectory`, `order_ok`, `oracle` |
 | `preflight/rl.py` | `GradeCache`, `Policy`, `train`, `split`; `N_FEATURES` and `DEFAULT_LR` |
-| `preflight/phase2.py` | `run_smoke`, `run_full`, and the worker CLI (`train`, `random`, `gold`, `empty`, `eval`, `oracle`) |
-| `preflight/report.py` | `smoke_metrics`, `full_metrics`, `gate_stats`, `h3_stats`, `h4_stats`, `write_report`, `write_metrics` |
+| `preflight/phase2.py` | `run_smoke`, `pool_ids`, `ensure_split`, and the worker CLI (`train`, `random`, `oracle`) |
+| `preflight/report.py` | `smoke_metrics`, `per_task_probabilities`, `write_report`, `write_metrics` |
 | `preflight/__main__.py` | CLI for the phase 1 `run` and `compare` commands |
-| `experiment.py` | the phase 1 suite under both environments, the phase 2 feasibility run, the full sweep |
+| `experiment.py` | the phase 1 suite under both environments and the phase 2 smoke run |
 | `demo.py` | a few airline tasks through the relation suite, or a short phase 2 training run, printed |
 
 ## Phase 1
@@ -133,31 +134,41 @@ has the same outcome and reward.
 
 ## Phase 2
 
+This build implements the smoke only: the first five train tasks, three seeds, `G_old` and `G_new`, 2,000 episodes per
+run, and the random baseline. The later full sweep (`G_proc`, ten seeds, held-out evaluation, H3 and H4, gold and
+empty baselines) is in the pre-registration and is not implemented in this code.
+
 ### The MDP (`preflight/mdp.py`)
 
 - `Action(kind, calls, gold_index)` is frozen; `kind` is `"gold"`, `"read"`, `"altered"` or `"stop"`; `calls` is a
 tuple of `Call` (two for a discoverable read that brings its unlock, empty for STOP); `gold_index` is the gold position
-of a gold call or of the gold write an altered copy comes from. A cached `is_write` flag saves re-resolving the kind.
+of a gold call or of the gold write an altered copy comes from.
 - `task_actions(domain, task)` is deterministic: gold calls first in gold order, then the P1 read candidates, then the
 altered writes, then STOP last. Reads are deduplicated by their calls and, when a discoverable read has not been
 unlocked before its insertion point, come as an unlock plus the wrapper call.
 - Altered writes: for each gold write, at most two copies, each swapping one string argument whose name ends in `_id`
 for another value that argument name takes in this task's gold run or, if none, in another banking task's gold run
 (sorted, first value). Numbers and every other argument are copied from the gold call, so #397 cannot differ between
-conditions.
+conditions. For a discoverable wrapper the `_id` value lives inside the wrapper's JSON `arguments` string and only
+that one value is rewritten there.
 - `horizon(task)` is gold length + 3. `allowed(actions, made)` keeps every action at most once per episode but always
-keeps STOP. `features(actions, i, made, step, horizon)` returns the eight shared features in the fixed order
-`is_read`, `is_write`, `is_gold`, `is_gold_next` (the earliest gold action not made), `is_altered`, `is_gating` (the
-action contains a `log_verification`), `is_stop`, `step / horizon`. `trajectory` flattens the made actions in order.
-- `order_ok(task, calls)`: for every `log_verification`, no earlier call may be one of the gold write names that come
-after that verification in the gold run. `oracle` returns `true_success = (new_reward == 1.0 and order_ok and no altered
-write was made)`, with `order_ok` and `no_altered` beside it; a `None` verdict (a grader error) gives false.
+keeps STOP; a wrapper read of a tool the gold run unlocks waits for that exact gold unlock, while a read whose action
+already contains its own unlock is available immediately.
+- `features(actions, i, made, step, horizon)` returns the eight shared features in the fixed order `is_read`,
+`is_write`, `is_gold`, `is_gold_next` (the earliest gold action not made), `is_altered`, `is_gating` (the action
+contains a `log_verification`), `is_stop`, `step / horizon`. `trajectory` flattens the made actions in order.
+- `order_ok(task, calls)`: for every gold `log_verification`, each of its own gated writes (the gold writes after that
+verification) that appears in the trajectory must come after that verification. Extra reads never count. Calls are
+matched with exact `Call` equality, inner wrapper tools included.
+- `oracle` returns `true_success = (new_reward == 1.0 and order_ok and no altered write was made)`, with `order_ok`
+and `no_altered` beside it; a `None` verdict (a grader error) gives false.
 
 ### The learner (`preflight/rl.py`)
 
 - `GradeCache(domain, grade=tau2_adapter.grade)` keys a real grader call by (task id, task fingerprint, canonical JSON
-of the ordered calls). A miss calls `grade` once and counts in `misses`; a grader exception is cached as `None` and
-asked for no second time. The cache lives in one run's process, i.e. one τ²-bench version and one condition.
+of the ordered calls). A miss calls `grade` once and counts in `misses`; instances are callable as
+`cache(task, calls)`. A grader exception is cached as `None` and asked for no second time. The cache lives in one run's
+process, i.e. one τ²-bench version and one condition.
 - `Policy(n_features, lr=0.1)` holds `w` (zeros) and `bias` (a dict keyed by `(task id, action index)`). `probs` is a
 softmax over `rows @ w` plus the bias of each candidate; `update(steps, advantage)` takes one gradient-ascent step on
 `advantage * log prob` of each chosen action, i.e. `chosen row - sum(p_i * row_i)` for `w` and `indicator - p_i` for
@@ -172,32 +183,31 @@ held-out.
 
 ### Orchestration (`preflight/phase2.py`)
 
-- `experiment.py` runs `python -B -m preflight.phase2 worker` in the interpretter of the condition, so each process
-loads exactly one τ²-bench version and sets `LITELLM_LOCAL_MODEL_COST_MAP=True` before importing it.
-- Worker modes: `train` (REINFORCE, then before writing the file it fills `calls` and the oracle parts), `random`
-(uniform over allowed actions), `gold` (all gold actions) and `empty` (STOP at once) as baselines, `eval` (the final
-policy over held-out tasks, 100 episodes per task) and `oracle` (re-grade a finished run's distinct trajectories under
-`G_new` and fill `new_reward`, `true_success`, `order_ok`, `no_altered`, `oracle_error`).
-- Conditions differ only in the running interpreter, except `G_proc`, whose reward is `G_new`'s verdict plus
-`order_ok`. A `G_old` run's oracle is filled afterwards, in the v1.0.1 interpreter.
+- `experiment.py` runs `python -B -m preflight.phase2 worker` in the condition's interpreter, so each process loads
+exactly one τ²-bench version and sets `LITELLM_LOCAL_MODEL_COST_MAP=True` before importing it.
+- Worker modes in this build: `train` (REINFORCE, then before writing the file it fills `calls` and the oracle parts),
+`random` (uniform over allowed actions), and `oracle` (re-grade a finished run's distinct trajectories under `G_new`
+and fill `new_reward`, `true_success`, `order_ok`, `no_altered`, `oracle_error`).
+- Conditions in the smoke are `G_old` and `G_new`. `G_proc` is defined in the pre-registration as exploratory and is
+not run in this build. A `G_old` run's oracle is filled afterwards, in the v1.0.1 interpreter.
 - `pool_ids()` reads `data/banking_pool.json` and falls back to every banking task when the file is missing;
-`ensure_split` writes `split.json` once and reuses it. The full sweep tunes the learning rate on five retail tasks for
-200 episodes and keeps the default on any failure.
-- `run_smoke` runs 5 train tasks × seeds 0-2 × G_old and G_new, 2,000 episodes each, plus the random policy, and
-oracle-fills the G_old runs. `run_full` runs seeds 0-9 × G_old, G_new and G_proc for 3,000 episodes, the random, gold
-and empty baselines, and the held-out evaluation, then writes the report and the metrics.
+`ensure_split` writes `split.json` once and reuses it. The smoke uses the first five train tasks, seeds 0 to 2, and
+2,000 episodes per run.
+- `run_smoke` runs old train, oracle-fills the old run in the v1.0.1 worker, runs new train and new random for each
+seed, then writes the report and the metrics.
 
 ### Report and metrics (`preflight/report.py`)
 
-- `smoke_metrics` and `full_metrics` are computed from the per-run episode records only: proxy reward and true success
-over the last 300 episodes, the extra-read rates, the grader-call and error counts, the distinct-trajectory count
-(task id plus canonical calls, over G_old and G_new), the gate window (episodes 1,701 to 2,000 when a run has 2,000,
-else the last 300), H3's recall over the distinct oracle-wrong reward-1 trajectories of G_old and G_new, and H4's
-paired-by-seed bootstrap of the extra-read difference (10,000 resamples, seed 0) with the no-gain condition.
-- `write_report` lays out the per-run table, the baselines, the curves at the fixed checkpoints, the gate, H3, H4, the
-held-out table and a scope line. Timings appear there and nowhere else.
-- `write_metrics` writes numbers only: booleans become 0/1, so two runs of the pipeline give identical metrics and the
-independent recompute of the pre-registration can be done from the per-run records outside the project.
+- `smoke_metrics` is computed from the per-run episode records only: grader calls old and new, errors across runs and
+the random baseline, gate true success over episodes 1,701 to 2,000 under `G_new`, random true success, old true
+success over the last 300 episodes, extra-read rates over the last 300 episodes for old, new and random, and distinct
+trajectories over old and new.
+- `per_task_probabilities` returns, per task and condition, the final policy's probabilities of gold actions, extra
+reads and STOP beside the uniform-start probabilities.
+- `write_report` lays out the per-run table with timings and episodes per second, grader calls per episode, the random
+baseline row, the kept-apart measures, the curves at fixed checkpoints, per-task final policy probabilities, the gate
+measure, the horizon note and a scope line. Timings appear there and nowhere else.
+- `write_metrics` writes numbers only: booleans become 0/1, so two runs of the smoke give identical metrics.
 
 ### Stated limitation: gold information
 
@@ -209,7 +219,7 @@ extra reads, order, altered writes — is.
 
 - Only the DB-state term decides a verdict; a task whose reward also depends on communication or assertions is
   covered only for its state term.
-- Tasks whose base run does not score 1 get no variants and stay in the results as "gold not accepted"; a relation
+- Tasks whose base run does not score 1 get no variants and stay in the results as `gold not accepted`; a relation
   that cannot be built yields no variant, so counts differ from task to task.
 - F1 cannot separate an empty run from a gold run that does not change the DB, so its counts are split by
   `gold_changes_db`; empty-gold tasks get no F1 at all.
@@ -220,4 +230,5 @@ extra reads, order, altered writes — is.
   fault in this harness, not as a finding.
 - Phase 2's policy is open-loop, its action set is built once per task, its grader cache is per run and never saved,
   and its oracle is ours. A G_old run needs the v1.0.1 interpreter to learn its true success, so the pipeline
-  dispatches that step as a separate process.
+  dispatches that step as a separate process. This build is the smoke only; held-out evaluation, G_proc, H3 and H4
+  are not computed here.

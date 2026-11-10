@@ -7,7 +7,7 @@ import numpy as np
 
 from preflight import tau2_adapter
 from preflight.mdp import allowed, features, horizon, task_actions, trajectory
-from preflight.relations import _inner_name, calls_as_dicts, canonical_json
+from preflight.relations import UNLOCK_AGENT, UNLOCK_USER, _inner_name, calls_as_dicts, canonical_json
 
 N_FEATURES = 8
 DEFAULT_LR = 0.1
@@ -56,6 +56,9 @@ class GradeCache:
             reward = None
         self._rewards[key] = reward
         return reward
+
+    def __call__(self, task, calls) -> float | None:
+        return self.cache(task, calls)
 
 
 def _chosen_position(action_ids, chosen):
@@ -133,12 +136,19 @@ def _gold_names(actions) -> set[str]:
         if action.kind != "gold":
             continue
         for call in action.calls:
+            if call.name in (UNLOCK_AGENT, UNLOCK_USER):
+                continue
             names.add(_inner_name(call) or call.name)
     return names
 
 
 def _read_names(action) -> set[str]:
-    return {_inner_name(call) or call.name for call in action.calls}
+    names = set()
+    for call in action.calls:
+        if call.name in (UNLOCK_AGENT, UNLOCK_USER):
+            continue
+        names.add(_inner_name(call) or call.name)
+    return names
 
 
 def _episode(policy, rng, task, actions, steps_limit, gold_names):

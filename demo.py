@@ -1,4 +1,4 @@
-"""Offline demo: phase 1 relations on a few tasks, or a short phase 2 training run printed as metrics."""
+"""Offline demo: phase 1 relations on a few tasks, or a short phase 2 smoke training run printed as metrics."""
 
 import argparse
 import json
@@ -98,7 +98,7 @@ def _phase1(args) -> int:
 
 
 def _phase2(args) -> int:
-    """A short training run on the first pool tasks; the metrics printed are the report's own."""
+    """A short smoke training run on the first pool tasks; the metrics printed are the smoke report's own."""
     from preflight.phase2 import DOMAIN, pool_ids, train_run
     from preflight.report import smoke_metrics
 

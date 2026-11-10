@@ -1,4 +1,4 @@
-"""Tests for the phase 2 helpers: rewards, the oracle fill, baselines, the split and report metrics."""
+"""Tests for the smoke phase 2 helpers: rewards, oracle fill, random episodes and report metrics."""
 
 import json
 import random
@@ -6,8 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
-
-import numpy as np
 
 from preflight import phase2, report
 from preflight.mdp import Action
@@ -68,14 +66,7 @@ class ConditionRewardTest(unittest.TestCase):
         self.assertIsNone(phase2._condition_reward("new", cache, object(), []))
 
 
-def _action_calls(actions, made):
-    calls = []
-    for index in made:
-        calls.extend(actions[index].calls)
-    return calls
-
-
-class OracleFillTest(unittest.TestCase):
+class OracleSetTest(unittest.TestCase):
     def test_old_runs_leave_true_success_unknown(self):
         episode = {"calls": [{"name": "look", "arguments": {}, "requestor": "assistant"}], "made": [0]}
         cache = mock.Mock()
@@ -137,12 +128,10 @@ class RandomMadeTest(unittest.TestCase):
         self.assertLessEqual(len(first), 5)
 
 
-def _read_task():
-    return mock.Mock(id="t0", model_dump=lambda mode="json": {"id": "t0"})
-
-
 class PolicyPayloadTest(unittest.TestCase):
     def test_policy_payload_round_trips(self):
+        import numpy as np
+
         policy = Policy(3)
         policy.w = np.array([1.0, -2.0, 0.5])
         policy.bias = {("t0", 0): 0.25, ("t0", 1): -0.5}
@@ -167,10 +156,6 @@ class SplitTest(unittest.TestCase):
             self.assertEqual(phase2.ensure_split(folder, ids), (train, held_out))
 
 
-def _payload(condition, seed=0, **episode):
-    return _run(condition, seed=seed, **episode)
-
-
 class RunPayloadTest(unittest.TestCase):
     def test_payload_counts_errors_and_rates(self):
         cache = mock.Mock(misses=3)
@@ -181,14 +166,58 @@ class RunPayloadTest(unittest.TestCase):
         self.assertEqual(payload["episodes_per_second"], 1.0)
 
 
-def _run_for_smoke(condition, seed=0, extra_reads=0, true_success=True):
-    return _payload(condition, seed=seed, extra_reads=extra_reads, true_success=true_success)
+class OracleFillTest(unittest.TestCase):
+    def test_oracle_fill_writes_new_reward_and_oracle_fields(self):
+        task = mock.Mock(id="t0")
+        calls = [{"name": "look", "arguments": {}, "requestor": "assistant"}]
+        payload = {
+            "task_ids": ["t0"],
+            "episodes": [{"task_id": "t0", "made": [0], "calls": calls, "reward": 1.0, "error": False}],
+        }
+        cache = mock.Mock()
+        cache.cache.return_value = 1.0
+        oracle = {"true_success": True, "order_ok": True, "no_altered": True}
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch("preflight.phase2._task_list", return_value=[task]),
+            mock.patch("preflight.phase2.task_actions", return_value=[Action("gold", (Call("look", {}),), 0)]),
+            mock.patch("preflight.phase2.GradeCache", return_value=cache),
+            mock.patch("preflight.phase2.oracle", return_value=oracle),
+        ):
+            path = Path(temporary) / "run.json"
+            phase2._write_json(path, payload)
+            result = phase2.oracle_fill(path, path)
+        episode = result["episodes"][0]
+        self.assertEqual(episode["new_reward"], 1.0)
+        self.assertTrue(episode["true_success"])
+        self.assertTrue(episode["order_ok"])
+        self.assertTrue(episode["no_altered"])
+        self.assertEqual(result["oracle_grader_calls"], 1)
+
+    def test_oracle_worker_dispatches_to_oracle_fill(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "run.json"
+            with mock.patch("preflight.phase2.oracle_fill") as fill:
+                phase2.main(
+                    [
+                        "worker",
+                        "--mode",
+                        "oracle",
+                        "--out",
+                        str(path),
+                        "--in",
+                        str(path),
+                        "--task-ids",
+                        "t0",
+                    ]
+                )
+            fill.assert_called_once_with(str(path), str(path), phase2.DOMAIN)
 
 
 class SmokeMetricsTest(unittest.TestCase):
     def test_smoke_metrics_are_numeric_and_reproducible(self):
-        runs = [_run_for_smoke("old", 0), _run_for_smoke("new", 0)]
-        random_runs = [_run_for_smoke("new", 9)]
+        runs = [_run("old", 0), _run("new", 0)]
+        random_runs = [_run("new", 9)]
         first = report.smoke_metrics(runs, random_runs, episodes=2000)
         second = report.smoke_metrics(runs, random_runs, episodes=2000)
         self.assertEqual(first, second)
@@ -199,54 +228,6 @@ class SmokeMetricsTest(unittest.TestCase):
             self.assertNotIsInstance(value, bool)
             self.assertIsInstance(value, (int, float))
 
-    def test_gate_uses_episodes_1701_to_2000_when_present(self):
-        episodes = [_episode(true_success=True) for _ in range(2000)]
-        run = _run("new", episodes=episodes)
-        value, held = report.gate_stats([run])
-        self.assertEqual(value, 1.0)
-        self.assertEqual(held, 1)
 
-
-def _trajectory(reward, true_success, order_ok=True, no_altered=True):
-    return _episode(
-        reward=reward,
-        true_success=true_success,
-        order_ok=order_ok,
-        no_altered=no_altered,
-        calls=[{"name": "look", "arguments": {}, "requestor": "assistant"}],
-    )
-
-
-class HypothesisStatsTest(unittest.TestCase):
-    def test_h3_counts_a_wrong_reward_one_as_the_order_class(self):
-        run = _run("new", episodes=[_trajectory(1.0, False, order_ok=False)])
-        stats = report.h3_stats([run])
-        self.assertEqual(stats["total"], 1)
-        self.assertEqual(stats["flagged"], 1)
-        self.assertEqual(stats["recall"], 1.0)
-        self.assertEqual(stats["held"], 1)
-
-    def test_h4_reports_lower_extra_reads_under_old(self):
-        old = _run("old", seed=0, extra_reads=0)
-        new = _run("new", seed=0, extra_reads=1)
-        stats = report.h4_stats([old, new])
-        self.assertLess(stats["diff"], 0.0)
-        self.assertLess(stats["ci_high"], 0.0)
-        self.assertEqual(stats["held"], 1)
-
-    def test_full_metrics_is_numeric(self):
-        old = _run("old", seed=0, extra_reads=0)
-        new = _run("new", seed=0, extra_reads=1)
-        metrics = report.full_metrics([old, new], random_runs=[new], episodes=2000)
-        for value in metrics.values():
-            self.assertNotIsInstance(value, bool)
-        self.assertEqual(metrics["h4_held"], 1)
-
-
-class WriteMetricsTest(unittest.TestCase):
-    def test_metrics_are_json_numbers(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "metrics.json"
-            report.write_metrics(path, {"a": True, "b": 2.5, "c": 3})
-            data = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(data, {"a": 1, "b": 2.5, "c": 3})
+if __name__ == "__main__":
+    unittest.main()
