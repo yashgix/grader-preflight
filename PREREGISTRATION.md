@@ -99,4 +99,23 @@ reported as a miss.
 
 ## Amendments
 
-None yet.
+### 1. Validity filters and controls (9 Nov 2026, before any relation run)
+
+Reason: a review of the method before the build found variants whose expected verdict was not justified, and no
+control that would expose a broken harness.
+
+- **F3 counts only effective writes.** A dropped write whose removal leaves the live end state (agent and user DB
+  hash) the same as the gold run's has nothing for the grader to catch; such variants are reported as "no-effect
+  write" with their count and are not F3 variants. (Retail's gold has 18 calls that raise an error.)
+- **P5 must be inert on the live env.** A P5 variant counts only if the agent and user DB hashes right after the
+  inserted call equal those right before it; otherwise it is reported as "not inert".
+- **Negative control.** τ²-bench's changelog says grading outside banking_knowledge did not change in 1.0.1. On
+  airline and retail, every variant's verdict must be identical under G_old and G_new. Any difference is a harness
+  fault: the run is invalid until it is explained.
+- **Changed task data counted apart.** Tasks whose gold run differs between the two versions (for example task_074
+  and tasks 077-086) are listed separately and left out of the H1 counts, because a verdict change there may come
+  from the data, not the grader.
+- **F1 split.** F1 results are reported separately for tasks whose gold run changes the DB and tasks whose gold run
+  does not (where an end-state grader cannot tell an empty run apart).
+- **Reproducibility.** Each result file records the tau2 commit, the `uv.lock` hash, the Python version and the
+  seed. The suite is run twice per version; the two runs must be identical apart from timings.
