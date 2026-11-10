@@ -1,5 +1,6 @@
 """Open-loop MDP over banking tool calls for the phase 2 RL preflight."""
 
+import hashlib
 import json
 from dataclasses import dataclass
 
@@ -18,7 +19,7 @@ from preflight.relations import (
     canonical_json,
     tool_kind,
 )
-from preflight.tau2_adapter import Call, fresh_env, gold_calls, tasks
+from preflight.tau2_adapter import Call, fresh_env, gold_calls, run, tasks
 
 _WRITE_KEYS: set[str] = set()
 _GATED_WRITES: dict[object, list[tuple[Call, list[Call]]]] = {}
@@ -71,14 +72,11 @@ def _gold_unlocks(gold: list[Call], name: str, unlock_name: str) -> bool:
 
 
 def _read_actions(domain: str, task, gold: list[Call]) -> list[Action]:
-    """Phase 1's P1 read candidates, with an unlock only when the gold run never unlocks that tool."""
-    try:
-        plans = _p1_plans(domain, task, gold)
-    except Exception:
-        return []
+    """Phase 1's P1 read candidates that run cleanly after the gold run, with an unlock only when the gold run never
+    unlocks that tool."""
     actions = []
     seen = set()
-    for route, name, position, arguments in plans:
+    for route, name, position, arguments in _p1_plans(domain, task, gold):
         read = _inserted_read(route, name, arguments)
         if route == "agent" and not _gold_unlocks(gold, name, UNLOCK_AGENT):
             calls = (Call(UNLOCK_AGENT, {"agent_tool_name": name}), read)
@@ -87,11 +85,17 @@ def _read_actions(domain: str, task, gold: list[Call]) -> list[Action]:
         else:
             calls = (read,)
         key = _calls_key(calls)
-        if key in seen:
+        if key in seen or not _runs_cleanly(domain, task, gold, calls):
             continue
         seen.add(key)
         actions.append(Action("read", calls))
     return actions
+
+
+def _runs_cleanly(domain: str, task, gold: list[Call], calls: tuple[Call, ...]) -> bool:
+    messages, _ = run(domain, task, gold + list(calls))
+    outputs = [m for m in messages if getattr(m, "role", "") == "tool"][-len(calls) :]
+    return not any(m.error or (m.content or "").startswith("Error") for m in outputs)
 
 
 def _values_by_name(gold: list[Call]) -> dict[str, set[str]]:
@@ -113,13 +117,12 @@ def _alternative_value(domain, task, task_values, name: str, current: str) -> st
     values.discard(current)
     if values:
         return sorted(values)[0]
+    others = set()
     for other in tasks(domain):
-        if getattr(other, "id", None) == getattr(task, "id", None):
-            continue
-        other_values = _values_by_name(gold_calls(other)).get(name, set()) - {current}
-        if other_values:
-            return sorted(other_values)[0]
-    return None
+        if getattr(other, "id", None) != getattr(task, "id", None):
+            others |= _values_by_name(gold_calls(other)).get(name, set())
+    others.discard(current)
+    return sorted(others)[0] if others else None
 
 
 def _id_candidates(call: Call) -> list[tuple[str, str, str]]:
@@ -349,6 +352,12 @@ def order_ok(task, calls: list[Call]) -> bool:
                 if not any(item < index for item in verification_indices):
                     return False
     return True
+
+
+def actions_fingerprint(actions: list[Action]) -> str:
+    """SHA-256 of a task's action list, so a run's action indexes can be checked in another tau2 version."""
+    rows = [[a.kind, [[c.name, c.arguments, c.requestor] for c in a.calls], a.gold_index] for a in actions]
+    return hashlib.sha256(json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def oracle(task, actions: list[Action], made: list[int], new_reward) -> dict:

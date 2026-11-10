@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from preflight import phase2, report
-from preflight.mdp import Action
+from preflight.mdp import Action, actions_fingerprint
 from preflight.rl import Policy
 from preflight.tau2_adapter import Call
 
@@ -71,9 +71,12 @@ class OracleSetTest(unittest.TestCase):
         episode = {"calls": [{"name": "look", "arguments": {}, "requestor": "assistant"}], "made": [0]}
         cache = mock.Mock()
         cache.cache.return_value = 1.0
-        phase2._set_oracle(episode, mock.Mock(id="t0"), [], "old", cache)
-        self.assertIsNone(episode["true_success"])
-        self.assertIsNone(episode["order_ok"])
+        actions = [Action("gold", (Call("look", {}),), 0)]
+        with mock.patch("preflight.mdp.order_ok", return_value=True):
+            phase2._set_oracle(episode, mock.Mock(id="t0"), actions, "old", cache)
+        self.assertIsNone(episode["true_success"])  # filled later in the v1.0.1 env
+        self.assertTrue(episode["order_ok"])  # the checks need no verdict
+        self.assertTrue(episode["no_altered"])
         self.assertFalse(episode["oracle_error"])
 
     def test_new_runs_use_the_new_verdict_and_the_oracle_parts(self):
@@ -92,9 +95,10 @@ class OracleSetTest(unittest.TestCase):
         episode = {"calls": [], "made": []}
         cache = mock.Mock()
         cache.cache.return_value = None
-        phase2._set_oracle(episode, mock.Mock(id="t0"), [], "new", cache)
+        with mock.patch("preflight.mdp.order_ok", return_value=True):
+            phase2._set_oracle(episode, mock.Mock(id="t0"), [], "new", cache)
         self.assertFalse(episode["true_success"])
-        self.assertIsNone(episode["order_ok"])
+        self.assertTrue(episode["order_ok"])
         self.assertTrue(episode["oracle_error"])
 
 
@@ -160,7 +164,9 @@ class RunPayloadTest(unittest.TestCase):
     def test_payload_counts_errors_and_rates(self):
         cache = mock.Mock(misses=3)
         records = [{"error": False, "oracle_error": False}, {"error": True, "oracle_error": False}]
-        payload = phase2._run_payload("new", 0, "banking_knowledge", ["t0"], 2, records, cache, 2.0)
+        actions = {"t0": [Action("stop", (), None)]}
+        payload = phase2._run_payload("new", 0, "banking_knowledge", ["t0"], 2, records, cache, 2.0, actions)
+        self.assertEqual(payload["action_fingerprints"], {"t0": actions_fingerprint(actions["t0"])})
         self.assertEqual(payload["errors"], 1)
         self.assertEqual(payload["grader_calls"], 3)
         self.assertEqual(payload["episodes_per_second"], 1.0)
@@ -170,17 +176,18 @@ class OracleFillTest(unittest.TestCase):
     def test_oracle_fill_writes_new_reward_and_oracle_fields(self):
         task = mock.Mock(id="t0")
         calls = [{"name": "look", "arguments": {}, "requestor": "assistant"}]
+        actions = [Action("gold", (Call("look", {}),), 0)]
         payload = {
             "task_ids": ["t0"],
+            "action_fingerprints": {"t0": actions_fingerprint(actions)},
             "episodes": [{"task_id": "t0", "made": [0], "calls": calls, "reward": 1.0, "error": False}],
         }
-        cache = mock.Mock()
-        cache.cache.return_value = 1.0
+        cache = mock.Mock(return_value=1.0, misses=1)
         oracle = {"true_success": True, "order_ok": True, "no_altered": True}
         with (
             tempfile.TemporaryDirectory() as temporary,
             mock.patch("preflight.phase2._task_list", return_value=[task]),
-            mock.patch("preflight.phase2.task_actions", return_value=[Action("gold", (Call("look", {}),), 0)]),
+            mock.patch("preflight.phase2.task_actions", return_value=actions),
             mock.patch("preflight.phase2.GradeCache", return_value=cache),
             mock.patch("preflight.phase2.oracle", return_value=oracle),
         ):
@@ -193,6 +200,35 @@ class OracleFillTest(unittest.TestCase):
         self.assertTrue(episode["order_ok"])
         self.assertTrue(episode["no_altered"])
         self.assertEqual(result["oracle_grader_calls"], 1)
+
+    def test_oracle_fill_refuses_a_different_action_list(self):
+        actions = [Action("gold", (Call("look", {}),), 0)]
+        payload = {"task_ids": ["t0"], "action_fingerprints": {"t0": "0" * 64}, "episodes": []}
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch("preflight.phase2._task_list", return_value=[mock.Mock(id="t0")]),
+            mock.patch("preflight.phase2.task_actions", return_value=actions),
+        ):
+            path = Path(temporary) / "run.json"
+            phase2._write_json(path, payload)
+            with self.assertRaises(ValueError):
+                phase2.oracle_fill(path, path)
+
+    def test_an_old_run_is_filled_by_the_new_version_worker(self):
+        task_id = phase2.pool_ids()[0]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "old.json"
+            phase2.train_run("old", 0, [task_id], 4, path)
+            phase2._run_worker(
+                phase2.DEFAULT_NEW, phase2._worker_args("old", "oracle", path, 4, 0, [task_id], input_path=path)
+            )
+            filled = json.loads(path.read_text())
+        self.assertGreaterEqual(filled["oracle_grader_calls"], 1)
+        for episode in filled["episodes"]:
+            self.assertIn(episode["new_reward"], (0.0, 1.0))
+            self.assertIsInstance(episode["true_success"], bool)
+            self.assertIsInstance(episode["order_ok"], bool)
+            self.assertIsInstance(episode["no_altered"], bool)
 
     def test_oracle_worker_dispatches_to_oracle_fill(self):
         with tempfile.TemporaryDirectory() as temporary:

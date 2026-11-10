@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from preflight import report
-from preflight.mdp import allowed, horizon, oracle, order_ok, task_actions, trajectory
+from preflight.mdp import actions_fingerprint, allowed, horizon, oracle, order_ok, task_actions, trajectory
 from preflight.relations import _inner_name, calls_as_dicts
 from preflight.rl import DEFAULT_LR, N_FEATURES, GradeCache, Policy, _gold_names, split, train
 from preflight.tau2_adapter import Call, tasks
@@ -193,21 +193,11 @@ def _set_oracle(episode, task, actions, condition, cache):
     calls = _calls_from_dicts(episode.get("calls") or [])
     raw = _new_reward(condition, cache, task, calls)
     episode["new_reward"] = None if raw is None else float(raw)
-    if raw is None and condition == "old":
+    episode.update(oracle(task, actions, episode["made"], raw))
+    pending = raw is None and condition == "old"  # filled later by oracle_fill in the v1.0.1 env
+    if pending:
         episode["true_success"] = None
-        episode["order_ok"] = None
-        episode["no_altered"] = None
-        episode["oracle_error"] = False
-        return
-    if raw is None:
-        episode["true_success"] = False
-        episode["order_ok"] = None
-        episode["no_altered"] = None
-        episode["oracle_error"] = True
-        return
-    result = oracle(task, actions, episode["made"], raw)
-    episode.update(result)
-    episode["oracle_error"] = False
+    episode["oracle_error"] = raw is None and not pending
 
 
 def _random_made(rng, actions, steps_limit):
@@ -240,8 +230,11 @@ def _policy_from_payload(payload):
     return policy
 
 
-def _run_payload(condition, seed, domain, task_ids, episodes, records, cache, seconds, policy=None, mode="train"):
+def _run_payload(
+    condition, seed, domain, task_ids, episodes, records, cache, seconds, actions_by_id, policy=None, mode="train"
+):
     payload = {
+        "action_fingerprints": {task_id: actions_fingerprint(actions) for task_id, actions in actions_by_id.items()},
         "condition": condition,
         "seed": int(seed),
         "domain": domain,
@@ -279,7 +272,7 @@ def train_run(condition, seed, task_ids, episodes, out_path, domain=DOMAIN, lr=D
         record["calls"] = calls_as_dicts(trajectory(actions, record["made"]))
         _set_oracle(record, task, actions, condition, cache)
     seconds = time.perf_counter() - started
-    payload = _run_payload(condition, seed, domain, task_ids, episodes, records, cache, seconds, policy)
+    payload = _run_payload(condition, seed, domain, task_ids, episodes, records, cache, seconds, actions_by_id, policy)
     _write_json(out_path, payload)
     return payload
 
@@ -305,7 +298,9 @@ def random_run(condition, seed, task_ids, episodes, out_path, domain=DOMAIN):
             _episode_payload(task, actions, made, value, value is None, raw, _extra_reads(actions, made), pending)
         )
     seconds = time.perf_counter() - started
-    payload = _run_payload(condition, seed, domain, task_ids, episodes, records, cache, seconds, mode="random")
+    payload = _run_payload(
+        condition, seed, domain, task_ids, episodes, records, cache, seconds, actions_by_id, mode="random"
+    )
     _write_json(out_path, payload)
     return payload
 
@@ -317,23 +312,20 @@ def oracle_fill(input_path, out_path=None, domain=DOMAIN):
     task_list = _task_list(domain, task_ids)
     by_id = {task.id: task for task in task_list}
     actions_by_id = {task.id: task_actions(domain, task) for task in task_list}
+    recorded = data.get("action_fingerprints", {})
+    for task_id, actions in actions_by_id.items():
+        if recorded.get(task_id) != actions_fingerprint(actions):
+            raise ValueError(f"{task_id}: the action list differs between tau2 versions, so indexes cannot be reused")
     cache = GradeCache(domain)
     for episode in data.get("episodes", []):
         task = by_id.get(str(episode.get("task_id")))
         if task is None:
             continue
         calls = _calls_from_dicts(episode.get("calls") or [])
-        raw = cache.cache(task, calls)
+        raw = cache(task, calls)
         episode["new_reward"] = None if raw is None else float(raw)
-        if raw is None:
-            episode["true_success"] = False
-            episode["order_ok"] = None
-            episode["no_altered"] = None
-            episode["oracle_error"] = True
-        else:
-            result = oracle(task, actions_by_id[task.id], episode.get("made", []), raw)
-            episode.update(result)
-            episode["oracle_error"] = False
+        episode.update(oracle(task, actions_by_id[task.id], episode.get("made", []), raw))
+        episode["oracle_error"] = raw is None
     data["oracle_grader_calls"] = int(cache.misses)
     data["oracle_errors"] = sum(1 for episode in data.get("episodes", []) if episode.get("oracle_error"))
     data["errors"] = sum(

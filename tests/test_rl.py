@@ -9,7 +9,7 @@ import numpy as np
 from preflight import mdp, rl
 from preflight.mdp import Action
 from preflight.rl import GradeCache, Policy, split, train
-from preflight.tau2_adapter import Call
+from preflight.tau2_adapter import Call, gold_calls, grade, tasks
 
 
 class _Task:
@@ -19,6 +19,17 @@ class _Task:
 
     def model_dump(self, mode="json"):
         return {"id": self.id, **self.payload}
+
+
+class RealGradeCacheTest(unittest.TestCase):
+    def test_a_hit_agrees_with_a_fresh_real_grade(self):
+        task = tasks("banking_knowledge")[0]
+        calls = gold_calls(task)[:-1]
+        grader = mock.Mock(wraps=grade)
+        cache = GradeCache("banking_knowledge", grade=grader)
+        first, second = cache(task, calls), cache(task, list(calls))
+        self.assertEqual((first, second, grader.call_count, cache.misses), (second, first, 1, 1))
+        self.assertEqual(second, grade("banking_knowledge", task, calls))
 
 
 class GradeCacheTest(unittest.TestCase):

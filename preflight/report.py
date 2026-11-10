@@ -48,10 +48,14 @@ def _last_n(run, count):
 
 
 def _gate_window(run):
-    episodes = _episodes(run)
-    if len(episodes) >= 2000:
-        return episodes[1700:2000]
-    return episodes[-300:]
+    """Episodes 1,701 to 2,000; empty for a shorter run, which has no gate measure."""
+    return _episodes(run)[1700:2000]
+
+
+def _gate_line(value):
+    if value < 0:
+        return "No gate measure: the runs have fewer than 2,000 episodes."
+    return f"G_new true success on episodes 1,701 to 2,000: {_format_rate(value)}."
 
 
 def _condition_runs(runs, condition):
@@ -101,7 +105,7 @@ def smoke_metrics(runs, random_runs=(), episodes=2000):
             for episode in _episodes(run)
             if episode.get("error") or episode.get("oracle_error")
         ),
-        "gate_true_success_new": _rate(gate, "true_success"),
+        "gate_true_success_new": _rate(gate, "true_success") if gate else -1.0,  # -1: fewer than 2,000 episodes
         "random_true_success": _rate(random_episodes, "true_success"),
         "true_success_old": _rate(old_last, "true_success"),
         "extra_read_rate_old": _extra_rate(old_last),
@@ -404,9 +408,7 @@ def write_report(path, runs, random_runs=(), metrics=None, per_task=None, full=F
             "",
             "## Gate",
             "",
-            "G_new true success on episodes 1,701 to 2,000: {}.".format(
-                _format_rate(metrics.get("gate_true_success_new", 0.0))
-            ),
+            _gate_line(metrics.get("gate_true_success_new", -1.0)),
             "",
             "## Scope",
             "",

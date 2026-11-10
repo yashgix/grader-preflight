@@ -103,6 +103,7 @@ class MdpTest(unittest.TestCase):
                 side_effect=lambda env, call: "write" if call.name == "write_a" else "read",
             ),
             mock.patch("preflight.mdp._p1_plans", return_value=plans),
+            mock.patch("preflight.mdp._runs_cleanly", return_value=True),
             mock.patch("preflight.mdp._alternative_value", return_value="A2"),
         ):
             actions = task_actions("banking_knowledge", task)
@@ -124,12 +125,28 @@ class MdpTest(unittest.TestCase):
             mock.patch("preflight.mdp.fresh_env", return_value=object()),
             mock.patch("preflight.mdp.tool_kind", return_value="read"),
             mock.patch("preflight.mdp._p1_plans", return_value=plans),
+            mock.patch("preflight.mdp._runs_cleanly", return_value=True),
         ):
             actions = task_actions("banking_knowledge", task)
 
         read = next(action for action in actions if action.kind == "read")
         self.assertEqual([call.name for call in read.calls], [mdp.UNLOCK_AGENT, "call_discoverable_agent_tool"])
         self.assertEqual(read.calls[0].arguments, {"agent_tool_name": "get_details"})
+
+    def test_a_read_that_errors_after_the_gold_run_is_dropped(self):
+        task = mock.Mock(id="t2")
+        gold = [Call("get_account", {"account_id": "A1"})]
+        plans = [("agent", "get_details", 1, {"account_id": "A1"})]
+        with (
+            mock.patch("preflight.mdp.gold_calls", return_value=gold),
+            mock.patch("preflight.mdp.fresh_env", return_value=object()),
+            mock.patch("preflight.mdp.tool_kind", return_value="read"),
+            mock.patch("preflight.mdp._p1_plans", return_value=plans),
+            mock.patch("preflight.mdp._runs_cleanly", return_value=False),
+        ):
+            actions = task_actions("banking_knowledge", task)
+
+        self.assertFalse([action for action in actions if action.kind == "read"])
 
     def test_already_unlocked_discoverable_read_has_no_second_unlock(self):
         task = mock.Mock(id="t3")
@@ -143,6 +160,7 @@ class MdpTest(unittest.TestCase):
             mock.patch("preflight.mdp.fresh_env", return_value=object()),
             mock.patch("preflight.mdp.tool_kind", return_value="read"),
             mock.patch("preflight.mdp._p1_plans", return_value=plans),
+            mock.patch("preflight.mdp._runs_cleanly", return_value=True),
         ):
             actions = task_actions("banking_knowledge", task)
 
