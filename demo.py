@@ -1,8 +1,10 @@
-"""Offline demo: a small airline run through the relation suite, printed step by step."""
+"""Offline demo: phase 1 relations on a few tasks, or a short phase 2 training run printed as metrics."""
 
 import argparse
 import json
 import os
+import tempfile
+from pathlib import Path
 
 # tau2's LLM paths must never reach the network; set before the suite imports tau2.
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
@@ -10,9 +12,12 @@ os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="demo.py", description=__doc__)
-    parser.add_argument("--domain", default="airline")
+    parser.add_argument("--phase", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--domain", default="airline", help="phase 1 domain")
     parser.add_argument("--limit", type=int, default=5, help="tasks to run")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--condition", choices=("old", "new", "proc"), default="new", help="phase 2 condition")
+    parser.add_argument("--episodes", type=int, default=200, help="phase 2 training episodes")
     return parser
 
 
@@ -81,8 +86,7 @@ def _print_example(result: dict) -> None:
         print(f"db fields that differ from the gold run: {', '.join(variant['db_diff'])}")
 
 
-def main(argv=None) -> int:
-    args = _parser().parse_args(argv)
+def _phase1(args) -> int:
     from preflight.suite import run_suite
 
     result = run_suite(args.domain, seed=args.seed, limit=args.limit)
@@ -91,6 +95,30 @@ def main(argv=None) -> int:
     _print_example(result)
     print(f"records sha256 {result['records_sha256']}")
     return 0
+
+
+def _phase2(args) -> int:
+    """A short training run on the first pool tasks; the metrics printed are the report's own."""
+    from preflight.phase2 import DOMAIN, pool_ids, train_run
+    from preflight.report import smoke_metrics
+
+    task_ids = pool_ids()[: args.limit]
+    if not task_ids:
+        print("no banking tasks in the pool")
+        return 1
+    with tempfile.TemporaryDirectory() as temporary:
+        path = Path(temporary) / "run.json"
+        payload = train_run(args.condition, args.seed, task_ids, args.episodes, path, domain=DOMAIN)
+    metrics = smoke_metrics([payload], episodes=args.episodes)
+    print(f"phase 2 demo: condition {args.condition}, {len(task_ids)} tasks, {len(payload['episodes'])} episodes")
+    for key in sorted(metrics):
+        print(f"  {key}: {metrics[key]}")
+    return 0
+
+
+def main(argv=None) -> int:
+    args = _parser().parse_args(argv)
+    return _phase2(args) if args.phase == 2 else _phase1(args)
 
 
 if __name__ == "__main__":

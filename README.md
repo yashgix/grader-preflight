@@ -1,30 +1,82 @@
 # grader-preflight
 
-An LLM-free preflight for graders of stateful tool environments. It takes a known-good ("gold") run, changes it in
-ways that should not matter (an extra read, `25` written as `25.0`, a call to a tool that does not exist) and in ways
-that should (a dropped write, an empty run, verification logged after the writes it gates), then checks that the
-grader's verdict moves the right way. No language model is called: each variant is built from the gold run, from the
-environment's own tool metadata and from the live DB state.
+An LLM-free preflight for the grader of a stateful tool environment, and a small reinforcement-learning experiment on
+what a grader flaw does to the policy trained against it. Both parts target τ²-bench's
+`EnvironmentEvaluator.calculate_reward`, before the v1.0.1 fixes (`pre-v1.0.1` at `b51a6d6`) and after them (`v1.0.1`
+at `fc0055d`).
 
-It targets τ²-bench's grader before and after the v1.0.1 fixes (`pre-v1.0.1` at `b51a6d6`, `v1.0.1` at
-`fc0055d`). The hypotheses, thresholds, seeds and the amendments that fix the protocol are in
+Phase 1 takes a known-good ("gold") run, changes it in ways that should not matter (an extra read, `25` written as
+`25.0`, a call to a tool that does not exist) and in ways that should (a dropped write, an empty run, verification
+logged after the writes it gates), then checks that the grader's verdict moves the right way. No language model is
+called: each variant is built from the gold run, from the environment's own tool metadata and from the live DB state.
+
+Phase 2 trains a small linear softmax policy over banking tool calls with REINFORCE, once per grader, and asks whether
+the flaw changes what the policy learns. It is a small, faithful RL experiment, not LLM-agent training: the policy is
+open-loop (it sees only the calls it has made and the step number, never a tool output), and every call it makes is a
+real τ²-bench tool call, graded by τ²-bench's own, unchanged grader.
+
+Hypotheses, thresholds, seeds and the five amendments that fix the protocol are in
 [PREREGISTRATION.md](PREREGISTRATION.md), committed before any experiment. How the pieces fit, and what the checks do
-not cover, is in [docs/DESIGN.md](docs/DESIGN.md). Results are the report and `metrics.json` that a comparison
-writes (see [Output](#output)).
+not cover, is in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Scope
 
-Only the environment-state terms of the reward are exercised: every verdict quoted here is the DB-state verdict of
-`EnvironmentEvaluator.calculate_reward`, called unchanged, on tasks whose `reward_basis` contains `DB`, in
-`banking_knowledge` (the `grep_only` retrieval variant, so it runs offline), `airline` and `retail`. The COMMUNICATE,
-NL_ASSERTION and ACTION terms are out of scope, and telecom is not part of phase 1.
+Every verdict in this project is the DB-state verdict of `EnvironmentEvaluator.calculate_reward`, called unchanged, on
+tasks whose `reward_basis` contains `DB`. The COMMUNICATE, NL_ASSERTION and ACTION terms are out of scope, and telecom
+is not covered.
 
-Every environment is built through `preflight/tau2_adapter.py`, the only place tau2's constructors are called. On
+Phase 1 covers `banking_knowledge` (built with the `grep_only` retrieval variant, so no API is reached), `airline` and
+`retail`. Phase 2 covers `banking_knowledge` only, on the 62 tasks phase 1 found comparable across the two versions.
+
+Environments are built only in `preflight/tau2_adapter.py`, the only place τ²-bench's constructors are called. On
 v1.0.1 banking logs a read to the hashed agent DB only when the read is on a per-task allowlist that τ²-bench's runner
-builds; the adapter derives the same allowlist with tau2's own `_derive_read_log_allowlist` and passes it to the live
-environment and to the grader, so banking is graded in the configuration τ²-bench actually runs.
+builds; the adapter derives the same allowlist with τ²-bench's own `_derive_read_log_allowlist` and passes it to the
+live environment and to the grader, so banking is graded in the configuration τ²-bench actually runs.
 
-## Relations
+## Running
+
+Everything runs in the two read-only environments; nothing is installed and no API key is present. Both entry points
+set `LITELLM_LOCAL_MODEL_COST_MAP=True` before τ²-bench is imported.
+
+```sh
+OLD=/Users/Shared/arcturus-exec/envs/tau2-pre-py312/bin/python
+NEW=/Users/Shared/arcturus-exec/envs/tau2-v101-py312/bin/python
+
+# phase 1: one domain on one version ($OLD is the grader before the fixes, $NEW the grader after them)
+$OLD -m preflight run --domain airline --seed 0 --out results/old/airline.json
+
+# phase 1: all three domains on both sides, then the comparison
+for domain in banking_knowledge airline retail; do
+  $OLD -m preflight run --domain "$domain" --seed 0 --out "results/old/$domain.json"
+  $NEW -m preflight run --domain "$domain" --seed 0 --out "results/new/$domain.json"
+done
+$OLD -m preflight compare results/old results/new --out results/report.md  # also writes results/metrics.json
+
+# phase 1 as one command
+$OLD experiment.py --phase 1 --out run/metrics.json
+
+# phase 2: the feasibility run, which is the default of experiment.py
+$OLD experiment.py --out results/phase2/metrics.json
+
+# phase 2: the full sweep, run only after the feasibility result has been seen
+$OLD experiment.py --full --out results/phase2/metrics.json
+
+# tests and demos
+$OLD -m unittest
+$NEW -m unittest
+$OLD demo.py --limit 5             # phase 1 relations on five airline tasks
+$NEW demo.py --phase 2 --limit 5   # a short training run, printed
+```
+
+`--relations F1,F3` restricts a phase 1 run to some relations and `--limit N` to the first N tasks. A phase 1 run is
+deterministic for a seed: the same seed gives the same variants and the same `records_sha256`, timings excluded.
+`--old-python` and `--new-python` override the two interpreters; `--seeds`, `--episodes` and `--processes` steer
+phase 2.
+
+CI runs `ruff check` and `ruff format --check` on every push; the unit tests need τ²-bench and run in the two
+environments above.
+
+## Phase 1: relations
 
 | Id | Change to the gold run | Expected verdict |
 | --- | --- | --- |
@@ -35,170 +87,163 @@ environment and to the grader, so banking is graded in the configuration τ²-be
 | F3 | drop one write whose removal changes the live end state | fail |
 | F6 | move a banking `log_verification` after the writes it gates | fail |
 
-A flag is a variant whose verdict differs from the one above. A task gets variants only when its gold run scores 1;
-a task whose gold run raises or scores 0 stays in the results as "gold not accepted".
+A flag is a variant whose verdict differs from its expected one. A task gets variants only when its gold run scores 1;
+a task whose gold run raises or scores 0 stays in the results as "gold not accepted". No variant ever equals the gold
+run (amendment 3), and each skipped relation is recorded in the task's `static.identical_to_gold`.
 
-- **P1** inserts one declared read. Candidates are the assistant toolkit's direct read tools and its discoverable read
-  tools, the kind read from the toolkit's `tool_type(name)`. Required argument names come from the tool's JSON schema
-  (`openai_schema` preferred); a discoverable read is a plain bound method with no schema, so its signature settles
-  which arguments are required (no default). Each required value is taken from the same-named argument of an earlier
-  call, inside wrapper `arguments` strings too, and the read goes right after the last call that supplied one. A
-  discoverable read is called through `call_discoverable_agent_tool` with a JSON `arguments` string; when the run has
-  not unlocked that tool earlier, its `unlock_discoverable_agent_tool` call goes right before the read, so a variant is
-  the gold run plus the read, or plus the unlock and the read. A discoverable read counts whether the gold run uses it
-  or not. Candidates are shuffled with the seed, with no priority by kind or route, and the first five whose replayed
-  prefix through the inserted call ends in a tool message that is not an error are kept. `inserted_in_gold` marks a
-  variant whose inserted tool also appears in the gold run; H1(a) counts those apart on both sides, because v1.0.1
-  keeps logging reads the gold run itself requires by design.
+- **P1** inserts one declared read, direct or discoverable. Required argument names come from the tool's JSON schema,
+  else the callable's signature, and every value is taken from the same-named argument of an earlier gold call. A
+  discoverable read the run has not unlocked brings its `unlock_discoverable_agent_tool` call first. Candidates are
+  shuffled with the seed and the first five whose replay through the inserted call ends in a non-error tool message
+  are kept. `inserted_in_gold` marks a variant whose inserted tool also appears in the gold run; H1(a) counts those
+  apart on both sides, because v1.0.1 keeps logging reads the gold run itself requires by design.
 - **P3** respells every numeric argument with the same value, integral `int` to `float` and integral `float` to `int`,
-  so the parsed value is unchanged and the spelling differs. Booleans are not numbers. Number tokens inside a JSON
-  `arguments` string are rewritten only for the discoverable wrappers (`call_discoverable_agent_tool`,
-  `call_discoverable_user_tool`, `give_discoverable_user_tool`); a string argument named `arguments` on any other tool
-  is left as it is. Nothing to respell means no variant (`identical_to_gold`).
-- **P5** inserts `no_such_tool` with `{}` arguments, as the assistant, at a position drawn with the seed. The variant
-  is kept only when the agent and user DB hashes right after the inserted call equal those right before it; otherwise
-  the task records `p5_not_inert` and gets no P5 variant. If that validation replay raises, the exception is recorded
-  in `relation_errors` for the relation and no variant is built: a check that did not complete is not a check that
-  passed.
-- **F1** is the empty run. It is dropped when the gold run is empty too, since then it is the gold run itself.
+  and rewrites number tokens inside the `arguments` string of the three discoverable wrappers only. Booleans are not
+  numbers. Nothing to respell means no variant (`identical_to_gold`).
+- **P5** inserts `no_such_tool` at a position drawn with the seed, kept only when the agent and user DB hashes around
+  the inserted call are unchanged; otherwise the task records `p5_not_inert` and gets no P5 variant.
+- **F1** is the empty run, dropped when the gold run is empty too.
 - **F3** drops one write per variant, and only writes whose removal changes the live end state; the others are counted
   in `static.no_effect_writes`.
 - **F6** exists only for banking tasks whose `log_verification` is followed by a write, and moves that call to the
   end.
 
-No variant ever equals the gold run (amendment 3); each skipped relation is recorded in the task's
-`static.identical_to_gold`.
+Two checks are recorded per task instead of as variants: `gold_errors` (S1, gold calls whose live output is an error)
+and `gold_changes_db` (S2, the gold run leaves the DB different from a fresh environment).
 
-Two checks are recorded per task instead of as variants: `gold_errors` (S1: gold calls whose live output is an error,
-including wrapper outputs starting with `Error:`) and `gold_changes_db` (S2: the gold run leaves the DB different
-from a fresh environment).
+## Phase 2: conditions
 
-## Running
+| Name | Reward | Environment |
+| --- | --- | --- |
+| `G_old` | `pre-v1.0.1` `calculate_reward`, through the adapter | `tau2-pre-py312` |
+| `G_new` | `v1.0.1`, through the adapter (read-log allowlist included) | `tau2-v101-py312` |
+| `G_proc` | `G_new` plus an order check (exploratory) | `tau2-v101-py312` |
 
-Everything runs in the two read-only environments; nothing is installed and no key is present. Both entry points set
-`LITELLM_LOCAL_MODEL_COST_MAP=True` before tau2 is imported.
+`G_proc` accepts a run only if `G_new` does and every `log_verification` comes before the first write it gates. It is
+reported beside the other two and never enters H3 or H4. One process can load only one τ²-bench version, so each
+condition runs as its own subprocess: `experiment.py` dispatches `python -m preflight.phase2 worker` into the right
+interpreter.
 
-```sh
-OLD=/Users/Shared/arcturus-exec/envs/tau2-pre-py312/bin/python
-NEW=/Users/Shared/arcturus-exec/envs/tau2-v101-py312/bin/python
+## Phase 2: tasks
 
-# one domain on one version ($OLD is the grader before the fixes, $NEW the grader after them)
-$OLD -m preflight run --domain airline --seed 0 --out results/old/airline.json
+`data/banking_pool.json` lists the 62 banking tasks that phase 1 found comparable across the two versions (the fixture
+rule of amendment 2) and whose base run scores 1 on both, with their task fingerprints. The split is drawn once per
+output folder: the pool ids are sorted, shuffled with `random.Random(20261110)`, and the first 30 are the train set
+and the next 10 held-out; it is written to `split.json` and reused on every later run.
 
-# all three domains on both sides, then the comparison
-for domain in banking_knowledge airline retail; do
-  $OLD -m preflight run --domain "$domain" --seed 0 --out "results/old/$domain.json"
-  $NEW -m preflight run --domain "$domain" --seed 0 --out "results/new/$domain.json"
-done
-$OLD -m preflight compare results/old results/new --out results/report.md  # also writes results/metrics.json
-```
+Hyperparameters are tuned on retail only (the control domain, where the two graders agree), over learning rate 0.05,
+0.1 and 0.2, on five retail tasks for 200 episodes each, then frozen for the full sweep. The feasibility run uses the
+defaults: learning rate 0.1 and a running mean of all past rewards as the baseline.
 
-`--relations F1,F3` restricts a run to some relations and `--limit N` to the first N tasks, which is enough for a
-smoke test. A run is deterministic for a seed: the same seed gives the same variants and the same `records_sha256`,
-timings excluded.
+## Phase 2: the episode
 
-The whole experiment is one command:
+- Horizon: gold length + 3 steps; the episode ends at STOP or at the horizon. The policy is open-loop.
+- Actions, built once per task and deterministic: every gold call; every READ candidate of phase 1's P1 (a
+  discoverable read the episode has not unlocked brings its unlock as one action); for every gold write, at most two
+  altered copies, each swapping one string argument whose name ends in `_id` for another value that argument name
+  takes in this task's gold run or, if none, in another banking task's; and STOP.
+- Eight features per action, shared across tasks: `is_read`, `is_write`, `is_gold`, `is_gold_next`, `is_altered`,
+  `is_gating` (a `log_verification`), `is_stop`, and step / horizon. A bias per task and action lets a task learn its
+  own order.
+- Numbers keep the gold run's spelling in every action, so #397 cannot differ between conditions and a G_old/G_new
+difference in what is learned comes from #329 alone. `is_gold` and `is_gold_next` tell the policy which actions the
+  gold run uses; they stand for an agent that roughly knows the right steps, so reaching the gold path is not a
+  result — what each grader does to the remaining choices is.
 
-```sh
-/Users/Shared/arcturus-exec/envs/tau2-pre-py312/bin/python experiment.py --out run/metrics.json
-```
+## Phase 2: learner and grading
 
-It runs the suite for all three domains under both environments (subprocesses, `--old-python` and `--new-python`
-override the defaults) and writes everything inside the folder that holds the output path: `run/results/old/*.json`,
-`run/results/new/*.json`, `run/report.md`, and the metrics at the output path itself. Two runs give identical metrics.
-The repo is not written to while it runs, and `experiment.py` recomputes nothing: the independent check of amendment 2
-works from the per-case files the run leaves behind.
+- Softmax over the features, REINFORCE with a running-mean baseline, undiscounted: every action of an episode gets the
+  episode's return, so nothing but the grader penalizes a lookup.
+- One run is one condition and one seed: 3,000 training episodes for the full sweep (2,000 for the feasibility run),
+  with tasks drawn uniformly from the 30 train tasks. Seeds 0 to 9, the same seeds for every condition; a seed fixes
+  the policy init and the episode sampling.
+- One grader call per distinct final trajectory, memoized inside the run's process: the key is the task id, the task
+  fingerprint and the canonical JSON of the ordered calls, and a miss calls the adapter's `grade`, which replays the
+  calls on a fresh τ²-bench environment. A grader exception is an error outcome: reward 0 for learning, counted apart,
+  never silently dropped.
 
-Tests and the demo run in either environment:
+## Phase 2: the oracle
 
-```sh
-$OLD -m unittest
-$NEW -m unittest
-$OLD demo.py --limit 5
-```
+"True success", our own measure and stated as ours: `G_new` passes, every `log_verification` comes before the first
+write it gates, and no altered write was made. It is logged every episode and never used as reward. A `G_old` process
+cannot load v1.0.1, so its distinct trajectories are re-graded under `G_new` afterwards, in the `tau2-v101-py312`
+interpreter, and true success is filled in from that; `G_new` and `G_proc` runs use their own `G_new` verdict.
 
-CI runs `ruff check` and `ruff format --check` on every push; the unit tests need tau2 and run in the environments
-above.
+## Phase 2: measures and hypotheses
+
+Per run, then mean and 95% bootstrap interval over seeds, paired by seed across conditions:
+
+- proxy reward, true success and proxy minus true, over the last 300 training episodes;
+- the extra-read rate (amendment 5): READ actions the gold run does not make, per episode, over the last 300 training
+  episodes and on held-out tasks with the final policy;
+- the stop-without-acting rate and the number of episodes to the first oracle-wrong reward-1 trajectory;
+- every distinct oracle-wrong reward-1 trajectory with its violation type — order (verification after a gated write),
+  altered write, or other — and whether phase 1 flagged that class on that grader.
+
+- **Gate:** RL stays in only if true success on the train tasks under `G_new` exceeds 0.8 within 2,000 episodes (mean
+  over episodes 1,701 to 2,000, then over seeds).
+- **H3:** at least 90% of the distinct oracle-wrong reward-1 trajectories under `G_old` and `G_new` fall in a class
+  phase 1 flagged (F6's order class). A miss is reported as a miss.
+- **H4:** the extra-read rate is lower under `G_old` than under `G_new` (paired by seed; the 95% bootstrap interval of
+  the difference lies below 0) with no gain in true success for `G_old`; the held-out rate is reported beside it.
+
+## Phase 2: baselines
+
+The random policy over the same actions, gold replay and the empty run (STOP at once), on the same tasks and seeds,
+give the scale each measure is read against. The random policy's proxy reward and true success are in the feasibility
+metrics; the gold and empty runs appear in the full report.
 
 ## Output
 
-Each result file holds `domain`, `seed`, `tau2_version`, `provenance` (the env's `SOURCE.txt` text and the Python
+A phase 1 result file holds `domain`, `seed`, `tau2_version`, `provenance` (the env's `SOURCE.txt` text and the Python
 version), the task records, the variant records, a `records_sha256` over the variants and the elapsed `seconds`.
-`tau2_version` is the tag named on the first line of `SOURCE.txt` (its second word).
 
-A task record holds `id`, `reward_basis`, its three fingerprints (`task_fingerprint`, `gold_fingerprint`,
-`gold_output_fingerprint`), the base run's `base_outcome` and `base_reward`, and a `static` entry with `gold_errors`,
-`gold_changes_db`, `no_effect_writes`, the relations skipped as `identical_to_gold`, `p5_not_inert` when the unknown
-call was not inert, and `base_error`, `static_error` or `relation_errors` when a replay, a static check or a generator
-raised. A task fingerprint is the SHA-256 of the whole task's canonical JSON; a gold output fingerprint is the
-SHA-256 of the gold run's tool outputs, each parsed as JSON when it parses, with every number read as a float, so `25`
-and `25.0` match.
+The comparison writes a Markdown report and a numbers-only `metrics.json` beside it: per domain and relation on each
+side the attempted, verdict, error, flagged-variant and flagged-task counts (so attempted = verdicts + errors); the
+same for P1 split by `inserted_in_gold`; the fixture-changed and one-sided tasks; unpaired comparable variants; the
+flags present on the old grader and absent on the new one; one line each for H1(a), H1(b) and H2 of the
+pre-registration; the airline/retail control with its mismatches; F1 counts per side, domain and `gold_changes_db`;
+the relations skipped as identical to gold; `p5_not_inert` and `no_effect_writes`; and the `records_sha256` of every
+input file. `metrics.json` has a fixed key set with 0/1 for held, never booleans.
 
-A variant record holds `task_id`, `relation`, `detail`, `expected_pass`, `inserted_in_gold`, the exact `calls`, the
-validity `checks` that were applied, `live_call_errors` (indexes of calls the live env answered with an error), its
-`output_fingerprint` (its live tool outputs, fingerprinted exactly like the gold output, null when the run raised),
-the variant and gold `end_state` hashes, its `outcome` (`verdict` or `error`), `reward`, `flagged`, `error`, and, when
-flagged, the top-level DB fields that differ from the gold run (`db_diff`). An exception while replaying or grading
-is an `outcome` of `error` with `reward` and `flagged` null; it is never counted as a reward or a flag, so every count
-reports attempted = verdicts + errors.
+Phase 2 writes everything inside the folder that holds its `--out` path:
 
-The comparison pairs cases before it counts anything: an OLD and a NEW variant are a pair when domain, `task_id`,
-`relation`, `detail` and the canonical JSON of `calls` are all equal, and only pairs on comparable tasks (present on
-both sides with identical fixtures) count toward the hypotheses. It writes a Markdown report and a numbers-only
-`metrics.json` beside it:
+- `runs/old_seed{S}.json`, `runs/new_seed{S}.json` and, in the full sweep, `runs/proc_seed{S}.json`: one run's
+  records, i.e. every episode's task, made actions, calls, reward, error flag, extra reads, `G_new` verdict and oracle
+  parts;
+- `runs/random_seed{S}.json`, plus `runs/gold.json` and `runs/empty.json` from the full sweep;
+- `heldout/{old,new,proc}_seed{S}.json` in the full sweep: 100 episodes per held-out task with the final policy;
+- `split.json`, `report.md` (tables, curves and timings) and the metrics at the output path.
 
-- per domain and relation, on each side: attempted, verdicts, errors, flagged variants and flagged tasks;
-- the same counts for P1 split into `inserted_in_gold` (`in gold`) and the rest (`not in gold`);
-- the tasks whose fixture changed, with which fingerprint differs (`task_fingerprint` or `gold_output_fingerprint`),
-  and tasks present on one side only;
-- comparable variants with no counterpart ("unpaired"), listed one by one;
-- the flags present on the old grader and absent on the new one, one line per pair (a pair flagged on OLD whose NEW
-  counterpart is a verdict and not flagged), giving domain, task, relation and `detail`;
-- one line each for H1(a), H1(b) and H2 of the pre-registration, with the numbers behind them:
-  H1(a) holds when a comparable banking P1 pair whose inserted tool is not in the gold run is flagged on the old
-  grader and no such pair is flagged on the new one, the new grader produced at least one verdict in that group, and
-  no unpaired comparable variant belongs to it; H1(b) is the same for P3; H2 holds when F3 passes in at most 1% of
-  its verdicts, at least 20 airline tasks pass an empty run on the new grader, F6 passes on at least half of the
-  banking tasks with an F6 variant, and at least one P-relation variant is flagged. A part with no verdict behind it
-  is not held.
-- the airline/retail control, with its mismatches when it fails: every task on both sides with an identical fixture,
-  every variant paired, and each pair with the same outcome and reward;
-- F1 counts per side, domain and `gold_changes_db` (`unknown` when a task has no such static entry);
-- the relations skipped as identical to gold, counted per domain and relation, and the `p5_not_inert` and
-  `no_effect_writes` counts per domain;
-- the `records_sha256` of every input file.
-
-`metrics.json` is a flat object of numbers only (0/1 for held, never booleans) with a fixed key set: `h1a_held`,
-`h1b_held`, `h2_held`, `control_passed`, `control_mismatches`, `p1_flagged_tasks_old`, `p1_flagged_tasks_new`,
-`p1_in_gold_flagged_tasks_new`, `p3_flagged_tasks_old`, `p3_flagged_tasks_new`, `f1_pass_airline_new`,
-`f3_pass_rate_new`, `f6_pass_share_new`, `changed_tasks`, `attempted_old`, `attempted_new`, `errors_old`, `errors_new`,
-`unpaired_comparable`, `records_digest_old`, `records_digest_new`. A side's `records_digest` is the integer value of
-the first 12 hex digits of the SHA-256 of its files' `records_sha256` values, sorted by domain and joined by
-newlines, so a repeated run is compared on every variant case and not only on totals.
+The metrics are numbers only and deterministic: two runs give identical metrics, and timings go into `report.md` only.
+The feasibility metrics are `episodes`, `grader_calls_old`, `grader_calls_new`, `errors`, `gate_true_success_new`,
+`random_true_success`, `true_success_old`, `extra_read_rate_old`, `extra_read_rate_new`, `random_extra_read_rate` and
+`distinct_trajectories`. The full sweep adds `gate_held`, `h3_recall`, `h3_held`, `oracle_wrong_reward1`,
+`oracle_wrong_flagged`, `h4_extra_read_diff`, `h4_ci_low`, `h4_ci_high`, `h4_held`, `true_success_proc`,
+`extra_read_rate_proc`, `gold_true_success`, `empty_true_success`, and the held-out true success and extra-read rates
+of the three conditions. The independent recompute of the pre-registration is done outside the project, from the
+per-run records the run leaves behind.
 
 ## Reading the results
 
 H2 is one hypothesis: it is held only if all four of its parts hold, so a part can hold (F6, say) while H2 is not
-held. The control covers airline and retail only; the changed-fixture tasks are all banking and matter only to H1. A
-phase 1 run says nothing about RL or held-out tasks, which are phase 2 of the pre-registration.
+held. The control covers airline and retail only; the changed-fixture tasks are all banking and matter only to H1.
+Phase 1 says nothing about RL or held-out tasks. Phase 2 is exploitability within its own action space, with the
+oracle shown beside the grader's verdict; it is not a claim about LLM agents.
 
 ## Known limits
 
 - Only the DB-state term decides a verdict; a task whose reward also depends on communication or assertions is
   covered only for its state term.
-- Tasks whose base run does not score 1 get no variants and stay in the results as "gold not accepted".
-- A relation that cannot be built on a task yields no variant: no write, no gated verification, no read whose
-  required arguments appear in the run, an empty gold run. Counts therefore differ from task to task.
-- F1 cannot separate an empty run from a gold run that does not change the DB, so its counts are reported split by
-  `gold_changes_db`; empty-gold tasks get no F1 at all.
-- `end_state` is a pair of DB hashes; `db_diff` names top-level fields that differ, not the values inside them.
-- `records_sha256` and the side digests cover the variant records only: a repeated run that differs in a task's base
-  outcome, its gold output fingerprint or its static checks keeps the same digest, so per-case repeatability is
-  checked from the per-case files as well.
-- Tool outputs are read as every second message from the end of a trajectory, which is how the adapter appends them.
-- The airline and retail control assumes those domains grade identically in both versions; a mismatch is treated as a
-  fault in this harness, not as a finding.
-- `experiment.py` passes on whatever the subprocesses wrote; it does not recompute the metrics.
+- Phase 1: tasks whose base run does not score 1 get no variants, and a relation that cannot be built on a task yields
+  no variant, so counts differ from task to task. F1 cannot separate an empty run from a gold run that does not change
+  the DB, so its counts are split by `gold_changes_db`.
+- Phase 2: the policy is open-loop and gets `is_gold` / `is_gold_next`; each distinct trajectory is graded once and
+  memoized inside the run, never saved; the oracle is ours; and a `G_old` run's true success needs the v1.0.1
+  interpreter afterwards. The extra-read rate counts READ actions whose inner tool name is not in the gold run, which
+  measures whether a flaw discourages harmless lookups, not whether identity was checked.
+- `records_sha256` and the phase 1 side digests cover variant records only, so per-case repeatability is checked from
+  the per-case files as well.
 
 ## About
 
@@ -208,4 +253,5 @@ team describes itself as "building high-fidelity RL environments for real-world 
 environments and verifiers."
 
 This project is an inference from that work rather than a company claim: a grader is the part of an environment that
-decides whether a rollout succeeded, so a cheap check on it is worth having before training against it.
+decides whether a rollout succeeded, so a cheap check on it is worth having before training against it, and a grader
+flaw is worth measuring in what a policy actually learns.

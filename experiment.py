@@ -1,4 +1,4 @@
-"""Run the full preflight suite under two tau2 environments and compare the results."""
+"""Run the preflight experiments: phase 1 relations, phase 2 smoke, or the full phase 2 sweep."""
 
 import argparse
 import json
@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 sys.dont_write_bytecode = True
+os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
 
 DOMAINS = ("banking_knowledge", "airline", "retail")
 REPO_ROOT = Path(__file__).resolve().parent
@@ -49,6 +50,7 @@ def _run_side(python: str, out_dir: Path) -> None:
 
 
 def run(out_path: Path, old_python: str, new_python: str) -> dict:
+    """Phase 1: both graders over every domain, then the case-by-case comparison."""
     from preflight.compare import compare
 
     out_path = Path(out_path).resolve()
@@ -65,17 +67,98 @@ def run(out_path: Path, old_python: str, new_python: str) -> dict:
     return json.loads(out_path.read_text(encoding="utf-8"))
 
 
+def run_smoke(
+    out_path,
+    old_python: str = DEFAULT_OLD,
+    new_python: str = DEFAULT_NEW,
+    episodes: int | None = None,
+    seeds=None,
+    processes: int = 4,
+) -> dict:
+    """Phase 2 feasibility run: five train tasks, a few seeds, G_old and G_new."""
+    from preflight.phase2 import run_smoke as phase2_run_smoke
+
+    kwargs = {
+        "out_path": Path(out_path),
+        "old_python": old_python,
+        "new_python": new_python,
+        "processes": processes,
+    }
+    if episodes is not None:
+        kwargs["episodes"] = episodes
+    if seeds is not None:
+        kwargs["seeds"] = seeds
+    return phase2_run_smoke(**kwargs)
+
+
+def run_full(
+    out_path,
+    old_python: str = DEFAULT_OLD,
+    new_python: str = DEFAULT_NEW,
+    episodes: int | None = None,
+    seeds=None,
+    processes: int = 4,
+) -> dict:
+    """Phase 2 full sweep: tuned learner, all seeds, baselines and held-out evaluation."""
+    from preflight.phase2 import run_full as phase2_run_full
+
+    kwargs = {
+        "out_path": Path(out_path),
+        "old_python": old_python,
+        "new_python": new_python,
+        "processes": processes,
+    }
+    if episodes is not None:
+        kwargs["episodes"] = episodes
+    if seeds is not None:
+        kwargs["seeds"] = seeds
+    return phase2_run_full(**kwargs)
+
+
+def _parse_seeds(value):
+    if value is None:
+        return None
+    return tuple(int(item) for item in value.split(",") if item.strip())
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="experiment.py")
     parser.add_argument("--out", required=True)
+    parser.add_argument("--phase", type=int, choices=(1, 2), default=2)
+    parser.add_argument("--full", action="store_true", help="run the full phase 2 sweep instead of the smoke run")
     parser.add_argument("--old-python", default=DEFAULT_OLD)
     parser.add_argument("--new-python", default=DEFAULT_NEW)
+    parser.add_argument("--episodes", type=int, default=None)
+    parser.add_argument("--seeds", default=None)
+    parser.add_argument("--processes", type=int, default=4)
     return parser
 
 
 def main(argv=None) -> int:
     args = _parser().parse_args(argv)
-    run(Path(args.out), args.old_python, args.new_python)
+    out = Path(args.out)
+    if args.phase == 1:
+        run(out, args.old_python, args.new_python)
+        return 0
+    seeds = _parse_seeds(args.seeds)
+    if args.full:
+        run_full(
+            out,
+            old_python=args.old_python,
+            new_python=args.new_python,
+            episodes=args.episodes,
+            seeds=seeds,
+            processes=args.processes,
+        )
+    else:
+        run_smoke(
+            out,
+            old_python=args.old_python,
+            new_python=args.new_python,
+            episodes=args.episodes,
+            seeds=seeds,
+            processes=args.processes,
+        )
     return 0
 
 
