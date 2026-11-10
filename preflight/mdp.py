@@ -67,9 +67,7 @@ def _domain_for(task) -> str:
 
 def _gold_unlocks(gold: list[Call], name: str, unlock_name: str) -> bool:
     key = _UNLOCK_KEY[unlock_name]
-    return any(
-        call.name == unlock_name and (call.arguments or {}).get(key) == name for call in gold
-    )
+    return any(call.name == unlock_name and (call.arguments or {}).get(key) == name for call in gold)
 
 
 def _read_actions(domain: str, task, gold: list[Call]) -> list[Action]:
@@ -263,9 +261,7 @@ def _needs_unlock(action: Action, actions: list[Action]) -> list[int] | None:
         if candidate.kind != "gold":
             continue
         for gold_call in candidate.calls:
-            if gold_call.name in _UNLOCK_NAMES and (gold_call.arguments or {}).get(
-                _UNLOCK_KEY[gold_call.name]
-            ) == name:
+            if gold_call.name in _UNLOCK_NAMES and (gold_call.arguments or {}).get(_UNLOCK_KEY[gold_call.name]) == name:
                 indices.append(index)
     return indices or None
 
@@ -344,9 +340,7 @@ def order_ok(task, calls: list[Call]) -> bool:
     call_keys = [_effective_call_keys(call) for call in calls]
     for verification, writes in gated:
         verification_keys = _effective_call_keys(verification)
-        verification_indices = [
-            index for index, keys in enumerate(call_keys) if keys & verification_keys
-        ]
+        verification_indices = [index for index, keys in enumerate(call_keys) if keys & verification_keys]
         for write in writes:
             write_keys = _effective_call_keys(write)
             for index, keys in enumerate(call_keys):
