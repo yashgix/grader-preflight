@@ -150,3 +150,17 @@ must be per task, not per file.
   the project's own `compare` code, before any result is reported.
 - **Protocol frozen.** After this amendment the protocol changes only on new evidence, through a further dated
   amendment that states that evidence.
+
+### 3. No variant may equal the gold run (9 Nov 2026, before any relation run)
+
+New evidence: while checking the protected tests, airline was found to have 7 tasks and retail 2 whose gold run has
+no calls at all. For them the F1 variant (empty run) is the gold run itself, so its expected verdict "fail" has no
+basis. The same holds for any variant whose calls equal the gold calls.
+
+- A variant whose calls equal the gold run's calls is not generated; the task records which relation was skipped and
+  why. It is counted in the report, not hidden.
+- Consequence, stated before any run: the environment sanity check (disclosed above) found 24 airline tasks where an
+  empty run passes; 7 of them are these empty-gold tasks, so at most 17 remain. H2's F1 threshold (at least 20) is
+  kept unchanged, and that part of H2 is now expected not to hold.
+- Also measured before any run, for the fixture rule of amendment 2: 62 of 88 banking tasks are comparable across
+  versions (10 changed definitions, 16 more with different gold tool outputs), and all 50 airline and 114 retail tasks.
