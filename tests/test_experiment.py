@@ -18,42 +18,30 @@ args = sys.argv[1:]
 domain = args[args.index("--domain") + 1]
 out = Path(args[args.index("--out") + 1])
 out.parent.mkdir(parents=True, exist_ok=True)
-
-variant = {{
+variant = {
     "task_id": "t0",
     "relation": "F1",
     "detail": "empty run",
     "expected_pass": False,
     "inserted_in_gold": False,
-    "calls": [],
-    "checks": {{}},
-    "live_call_errors": [],
-    "end_state": {{"variant": [None, None], "gold": [None, None]}},
     "outcome": "verdict",
     "reward": 0.0,
     "flagged": True,
-    "error": None,
-    "db_diff": None,
-}}
-task = {{
+}
+task = {
     "id": "t0",
-    "reward_basis": ["DB"],
     "task_fingerprint": "task-" + domain,
     "gold_output_fingerprint": "gold-" + domain,
-    "base_outcome": "verdict",
-    "base_reward": 1.0,
-    "static": {{"gold_changes_db": True}},
-}}
-payload = {{
+    "static": {"gold_changes_db": True},
+}
+payload = {
     "domain": domain,
     "seed": 0,
-    "tau2_version": "1.0.1",
-    "provenance": {{"source": None, "python": "3.12"}},
     "tasks": [task],
     "variants": [variant],
     "records_sha256": "sha-" + domain,
     "seconds": 0.0,
-}}
+}
 out.write_text(json.dumps(payload), encoding="utf-8")
 """
 
@@ -63,7 +51,8 @@ class ExperimentTest(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.fake = self.root / "fake_python"
-        self.fake.write_text(FAKE_PYTHON.format(python=sys.executable), encoding="utf-8")
+        # Only the shebang placeholder is substituted; the script's own braces must survive untouched.
+        self.fake.write_text(FAKE_PYTHON.replace("{python}", sys.executable), encoding="utf-8")
         self.fake.chmod(0o755)
         self.out = self.root / "run" / "metrics.json"
 

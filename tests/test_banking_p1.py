@@ -4,15 +4,29 @@ import json
 import random
 import unittest
 
-from preflight.relations import AGENT_WRAPPER, UNLOCK_AGENT, _p1_plans, build_variants, tool_kind
-from preflight.tau2_adapter import fresh_env, gold_calls, tasks
+from preflight.relations import (
+    AGENT_WRAPPER,
+    UNLOCK_AGENT,
+    _inner_name,
+    _p1_plans,
+    build_variants,
+    tool_error,
+    tool_kind,
+)
+from preflight.tau2_adapter import fresh_env, gold_calls, run, tasks
 
 DOMAIN = "banking_knowledge"
 
 
 def _task_with_unlocks(scan=40):
-    """The shortest banking gold run that unlocks a discoverable tool."""
-    candidates = [task for task in tasks(DOMAIN)[:scan] if any(c.name == UNLOCK_AGENT for c in gold_calls(task))]
+    """The shortest banking gold run that unlocks a discoverable tool and has an agent read candidate."""
+    candidates = []
+    for task in tasks(DOMAIN)[:scan]:
+        gold = gold_calls(task)
+        if not any(call.name == UNLOCK_AGENT for call in gold):
+            continue
+        if any(route == "agent" for route, _, _, _ in _p1_plans(DOMAIN, task, gold)):
+            candidates.append(task)
     return min(candidates, key=lambda task: len(gold_calls(task))) if candidates else None
 
 
@@ -26,6 +40,46 @@ def _inserted(gold, calls):
             continue
         return position, tuple(calls[position : position + size])
     return None, ()
+
+
+def _inserted_read(gold, calls):
+    """(position, read): where a variant inserts its block, and the read call inside it."""
+    position, block = _inserted(gold, calls)
+    if position is None or not block:
+        return None, None
+    return position, block[-1]
+
+
+def _unseen_agent_reads(task, gold):
+    """Discoverable reads the gold run never reaches, the case amendment 4 is about."""
+    used = {_inner_name(call) or call.name for call in gold}
+    return [
+        name
+        for route, name, _, _ in _p1_plans(DOMAIN, task, gold)
+        if route == "agent" and name not in used
+    ]
+
+
+def _task_with_an_unseen_read(scan=40):
+    """The first banking task whose P1 variants include one on a read the gold run does not use."""
+    for task in tasks(DOMAIN)[:scan]:
+        gold = gold_calls(task)
+        if not gold:
+            continue
+        try:
+            if not _unseen_agent_reads(task, gold):
+                continue
+            variants, _ = build_variants("P1", DOMAIN, task, random.Random(f"0:{task.id}:P1"))
+        except Exception:  # a task the live env cannot replay is not this test's subject
+            continue
+        unseen = []
+        for variant in variants:
+            _, read = _inserted_read(gold, variant.calls)
+            if read is not None and read.name == AGENT_WRAPPER and not variant.inserted_in_gold:
+                unseen.append(variant)
+        if unseen:
+            return task, gold, unseen
+    return None, [], []
 
 
 class BankingP1Test(unittest.TestCase):
@@ -78,6 +132,46 @@ class BankingP1Test(unittest.TestCase):
             else:
                 self.assertIn(inner, unlocked)
         self.assertTrue(checked, "no inserted read went through the discoverable wrapper")
+
+
+class UnseenReadP1Test(unittest.TestCase):
+    """Amendment 4: P1 must reach a discoverable read the gold run never uses, not only a repeated one."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.task, cls.gold, cls.variants = _task_with_an_unseen_read()
+
+    def setUp(self):
+        if self.task is None:
+            self.skipTest("no banking task yields a P1 variant on a read the gold run does not use")
+
+    def test_the_variant_calls_an_unseen_read_through_the_wrapper(self):
+        for variant in self.variants:
+            position, read = _inserted_read(self.gold, variant.calls)
+            self.assertIsNotNone(position, variant.detail)
+            self.assertEqual(read.name, AGENT_WRAPPER, variant.detail)
+            self.assertIsInstance(read.arguments.get("arguments"), str, variant.detail)
+            self.assertIsInstance(json.loads(read.arguments["arguments"]), dict, variant.detail)
+            self.assertFalse(variant.inserted_in_gold, variant.detail)
+
+    def test_the_unlock_and_the_read_run_cleanly(self):
+        for variant in self.variants:
+            position, block = _inserted(self.gold, variant.calls)
+            self.assertIsNotNone(position, variant.detail)
+            inner = block[-1].arguments["agent_tool_name"]
+            unlocked = [
+                call.arguments.get("agent_tool_name")
+                for call in variant.calls[:position]
+                if call.name == UNLOCK_AGENT
+            ]
+            if len(block) == 2:
+                self.assertEqual(block[0].name, UNLOCK_AGENT, variant.detail)
+                self.assertEqual(block[0].arguments, {"agent_tool_name": inner}, variant.detail)
+                self.assertNotIn(inner, unlocked, variant.detail)
+            else:
+                self.assertIn(inner, unlocked, variant.detail)
+            messages, _ = run(DOMAIN, self.task, list(variant.calls[: position + len(block)]))
+            self.assertFalse(tool_error(messages[-1]), variant.detail)
 
 
 if __name__ == "__main__":

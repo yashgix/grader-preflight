@@ -13,6 +13,7 @@ from preflight.relations import (
     canonical_json,
     db_hashes,
     p1_extra_read,
+    p3_respelled_numbers,
     static_checks,
     tool_error,
     tool_kind,
@@ -192,6 +193,13 @@ class ParametersTest(unittest.TestCase):
 
         self.assertEqual(_parameters(_Tool()), (["account_id"], ["account_id"]))
 
+    def test_a_bound_method_supplies_its_signature(self):
+        class _Discoverable:
+            def get_details(self, account_id, note="none"):
+                return account_id, note
+
+        self.assertEqual(_parameters(_Discoverable().get_details), (["account_id", "note"], ["account_id"]))
+
 
 class P1CandidateTest(unittest.TestCase):
     def test_failing_candidates_do_not_take_a_variant_slot(self):
@@ -209,6 +217,19 @@ class P1CandidateTest(unittest.TestCase):
         self.assertEqual(len(variants), 5)
         for variant in variants:
             self.assertNotIn(variant.calls[0].name, failing)
+
+    def test_candidates_are_shuffled_with_the_seed(self):
+        plans = [("direct", f"read{index}", 0, {}) for index in range(8)]
+        expected = list(plans)
+        random.Random(0).shuffle(expected)
+
+        with mock.patch("preflight.relations.gold_calls", return_value=[Call("write_a", {})]), mock.patch(
+            "preflight.relations._p1_plans", return_value=list(plans)
+        ), mock.patch("preflight.relations._ran_cleanly", return_value=True):
+            variants = p1_extra_read("airline", object(), random.Random(0))
+
+        inserted = [variant.calls[0].name for variant in variants]
+        self.assertEqual(inserted, [plan[1] for plan in expected[:5]])
 
     def test_an_already_unlocked_read_gets_no_second_unlock(self):
         gold = [
@@ -354,6 +375,21 @@ class P3Test(unittest.TestCase):
                 self.assertTrue(notes.get("identical_to_gold"))
                 return
         self.skipTest("every gold run has numeric arguments")
+
+    def test_numbers_inside_a_wrapper_arguments_string_are_respelled(self):
+        arguments = json.dumps({"account_id": "A1", "amount": 25, "note": "25"}, sort_keys=True)
+        gold = [Call("call_discoverable_agent_tool", {"agent_tool_name": "get_details", "arguments": arguments})]
+        with mock.patch("preflight.relations.gold_calls", return_value=gold):
+            variants = p3_respelled_numbers("banking_knowledge", object(), random.Random(0))
+
+        self.assertEqual(len(variants), 1)
+        self.assertTrue(variants[0].expected_pass)
+        respelled = variants[0].calls[0].arguments["arguments"]
+        self.assertIsInstance(respelled, str)
+        self.assertNotEqual(respelled, arguments)
+        self.assertEqual(json.loads(respelled), json.loads(arguments))
+        self.assertIn("25.0", respelled)
+        self.assertIn('"25"', respelled)
 
 
 class P5Test(unittest.TestCase):
@@ -511,6 +547,24 @@ class StaticChecksTest(unittest.TestCase):
                 break
         if not checked:
             self.skipTest("no task replayed cleanly in any domain")
+
+    def test_gold_errors_counts_flagged_and_wrapper_errors(self):
+        class _Message:
+            def __init__(self, content=None, error=False):
+                self.content = content
+                self.error = error
+
+        messages = [_Message(), _Message(error=True), _Message(), _Message(content="Error: no such tool")]
+        with mock.patch("preflight.relations.gold_calls", return_value=[Call("a", {}), Call("b", {})]), mock.patch(
+            "preflight.relations.run", return_value=(messages, _HashEnv("agent", "user"))
+        ), mock.patch("preflight.relations._calls_of_kind", return_value=[]), mock.patch(
+            "preflight.relations.fresh_env", return_value=_HashEnv("other", "other")
+        ):
+            checks = static_checks("airline", tasks("airline")[0])
+
+        self.assertEqual(checks["gold_errors"], 2)
+        self.assertTrue(checks["gold_changes_db"])
+        self.assertEqual(checks["no_effect_writes"], 0)
 
 
 class DbHashesTest(unittest.TestCase):

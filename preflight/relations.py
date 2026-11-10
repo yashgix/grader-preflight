@@ -22,7 +22,7 @@ WRITE = "write"
 KINDS = {"read", "write", "generic", "think"}
 MAX_P1_VARIANTS = 5
 UNKNOWN_TOOL = "no_such_tool"
-_JSON_NUMBER = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][-+]?\d+)?")
+_JSON_NUMBER = re.compile(r"-?(?:0|[1-9][0-9]*)(?:[.][0-9]+)?(?:[eE][-+]?[0-9]+)?")
 _MISSING = object()
 
 
@@ -51,7 +51,12 @@ def _loads(text):
 
 
 def _named_tools(tools) -> dict:
-    return {tool.name: tool for tool in tools if getattr(tool, "name", None)}
+    found = {}
+    for tool in tools:
+        name = getattr(tool, "name", None) or getattr(tool, "__name__", None)
+        if name:
+            found[name] = tool
+    return found
 
 
 def _toolkit_tools(toolkit, discoverable: bool = False) -> dict:
@@ -74,13 +79,6 @@ def _toolkit_tools(toolkit, discoverable: bool = False) -> dict:
     if isinstance(toolkit, (list, tuple)):
         return _named_tools(toolkit)
     return {}
-
-
-def _tool(toolkit, name: str):
-    tools = _toolkit_tools(toolkit)
-    if name in tools:
-        return tools[name]
-    return _toolkit_tools(toolkit, discoverable=True).get(name)
 
 
 def _kind(tool) -> str:
@@ -199,10 +197,11 @@ def _schema(tool) -> dict:
 
 def _signature(tool) -> tuple[list, list]:
     func = getattr(tool, "func", None)
-    if not callable(func):
+    target = func if callable(func) else tool if callable(tool) else None
+    if target is None:
         return [], []
     try:
-        params = inspect.signature(func).parameters
+        params = inspect.signature(target).parameters
     except (TypeError, ValueError):
         return [], []
     names = [
@@ -223,7 +222,7 @@ def _plain_parameters(tool) -> list:
 
 
 def _parameters(tool) -> tuple[list, list]:
-    """(argument names, required names) from the JSON schema, else the function signature, else the mapping."""
+    """(argument names, required names) from the JSON schema, else the callable signature, else the mapping."""
     schema = _schema(tool)
     if schema:
         names = list(schema["properties"])
@@ -247,23 +246,11 @@ def _argument_index(gold: list[Call]) -> dict:
     return index
 
 
-def _unlock_positions(gold: list[Call]) -> dict:
-    """Inner tool name -> the first position after the gold call that unlocks it."""
-    positions = {}
-    for index, call in enumerate(gold):
-        key = UNLOCK_KEY.get(call.name)
-        name = (call.arguments or {}).get(key) if key else None
-        if isinstance(name, str):
-            positions.setdefault(name, index + 1)
-    return positions
-
-
-def _plan_for(route: str, name: str, tool, supplied: dict, unlock_at: int = 0):
+def _plan_for(route: str, name: str, tool, supplied: dict):
     _, required = _parameters(tool)
     if any(arg not in supplied for arg in required):
         return None
-    positions = [supplied[arg][0] + 1 for arg in required]
-    position = max([unlock_at] + positions)
+    position = max([supplied[arg][0] + 1 for arg in required], default=0)
     arguments = {arg: supplied[arg][1] for arg in required}
     return route, name, position, arguments
 
@@ -275,9 +262,8 @@ def _p1_plans(domain: str, task: Task, gold: list[Call]) -> list[tuple[str, str,
     direct_tools = _toolkit_tools(tools)
     discoverable_tools = _toolkit_tools(tools, discoverable=True)
     supplied = _argument_index(gold)
-    unlocked = _unlock_positions(gold)
     plans = []
-    for name, tool in sorted(direct_tools.items()):
+    for name, tool in direct_tools.items():
         if name in NAME_KEY or name in UNLOCK_KEY or name in discoverable_tools:
             continue
         # A tool's declared kind lives on the toolkit, not necessarily on the Tool object it hands out.
@@ -286,12 +272,12 @@ def _p1_plans(domain: str, task: Task, gold: list[Call]) -> list[tuple[str, str,
         plan = _plan_for("direct", name, tool, supplied)
         if plan:
             plans.append(plan)
-    for name, tool in sorted(discoverable_tools.items()):
+    for name, tool in discoverable_tools.items():
         if name in NAME_KEY or name in UNLOCK_KEY:
             continue
         if _declared_kind(tools, name) != READ:
             continue
-        plan = _plan_for("agent", name, tool, supplied, unlocked.get(name, 0))
+        plan = _plan_for("agent", name, tool, supplied)
         if plan:
             plans.append(plan)
     plans.sort(key=lambda plan: (plan[0], plan[1], plan[2]))
@@ -311,8 +297,7 @@ def _inserted_read(route: str, name: str, arguments: dict) -> Call:
 
 def _unlocked_before(gold: list[Call], name: str, position: int) -> bool:
     for call in gold[:position]:
-        key = UNLOCK_KEY.get(call.name)
-        if key and (call.arguments or {}).get(key) == name:
+        if call.name == UNLOCK_AGENT and (call.arguments or {}).get("agent_tool_name") == name:
             return True
     return False
 
@@ -335,22 +320,11 @@ def _ran_cleanly(domain: str, task: Task, calls: tuple[Call, ...], position: int
     return bool(messages) and not tool_error(messages[-1])
 
 
-def _p1_priority(plan, in_gold):
-    route, name, _, _ = plan
-    if route == "agent" and name not in in_gold:
-        return 0
-    if route == "agent":
-        return 1
-    return 2
-
-
 def p1_extra_read(domain: str, task: Task, rng: random.Random) -> list[Variant]:
     gold = gold_calls(task)
     plans = _p1_plans(domain, task, gold)
+    rng.shuffle(plans)
     in_gold = {_inner_name(call) or call.name for call in gold}
-    # Previously unused discoverable reads are the case that can expose the banking #329 fix;
-    # keep them from being crowded out by direct reads before the five-variant limit.
-    plans.sort(key=lambda plan: (_p1_priority(plan, in_gold), rng.random()))
     variants = []
     for route, name, position, arguments in plans:
         calls, read_index = _insert_with_unlock(gold, route, name, position, arguments)
@@ -407,7 +381,7 @@ def _respell_json(text: str) -> str:
             out.append(char)
             if escaped:
                 escaped = False
-            elif char == "\\":
+            elif char == chr(92):
                 escaped = True
             elif char == '"':
                 in_string = False

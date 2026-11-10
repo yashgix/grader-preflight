@@ -2,10 +2,15 @@
 
 ## Scope
 
-Every verdict in this project is the DB-state verdict of `EnvironmentEvaluator.calculate_reward`, called unchanged.
-Tasks are those with `DB` in `reward_basis`; the COMMUNICATE, NL_ASSERTION and ACTION terms are never the subject of a
-variant. Phase 1 covers `banking_knowledge` (built with the `grep_only` retrieval variant, so no API is reached),
-`airline` and `retail`.
+Every verdict in this project is the DB-state verdict of `EnvironmentEvaluator.calculate_reward`, called unchanged
+with the environment arguments τ²-bench's runner uses for the task. Tasks are those with `DB` in `reward_basis`; the
+COMMUNICATE, NL_ASSERTION and ACTION terms are never the subject of a variant. Phase 1 covers `banking_knowledge`
+(built with the `grep_only` retrieval variant, so no API is reached), `airline` and `retail`.
+
+Environments are built only in `preflight/tau2_adapter.py`, never through tau2's constructors directly. On v1.0.1
+banking logs a read to the hashed agent DB only when the read is on a per-task allowlist built by tau2's runner; the
+adapter derives it with tau2's own `_derive_read_log_allowlist` and passes it to the live environment and to the
+grader.
 
 ## Module map
 
@@ -19,6 +24,12 @@ variant. Phase 1 covers `banking_knowledge` (built with the `grep_only` retrieva
 | `experiment.py` | the suite under both environments, then the comparison |
 | `demo.py` | a few airline tasks, printed |
 
+## Base run
+
+Each task's gold run is replayed once on a fresh environment and graded. Only a task whose base verdict is 1 gets
+variants; a base run that raises is recorded as `base_outcome: "error"` with `static.base_error`, keeps the record's
+shape, and gets no variants.
+
 ## Resolving a call to a tool
 
 `tool_kind(env, call)` answers what a call reaches, not what it is named. `call_discoverable_agent_tool` reaches the
@@ -27,8 +38,8 @@ tool named by `agent_tool_name` in `env.tools`, `call_discoverable_user_tool` th
 `env.user_tools` for a user call. Existence is settled by `has_tool(name)` when the toolkit has one, and the declared
 kind by the toolkit's `tool_type(name)` when that is callable, else by the `Tool` object's own `tool_type`. The kind is
 read as a lowercase string (an enum's `value` when it is one); anything outside `read`, `write`, `generic` and `think`
-counts as `generic`, and a name in neither toolkit is `unknown`. Toolkits are read whether the environment exposes them
-as a dict or as a sequence of tools with `.name`.
+counts as `generic`, and a name in neither toolkit is `unknown`. Toolkit contents are read through `get_tools()` and
+`get_discoverable_tools()`, with a dict or a sequence of tools with `.name` accepted as a fallback.
 
 A live tool message counts as an error when it has `error=True` or when its content is a string starting with
 `Error:` — the second form is how the discoverable wrappers report a failure.
@@ -40,22 +51,26 @@ and it applies the rules that make an expected verdict defensible.
 
 **P1, an extra read.** `_p1_plans` collects the assistant toolkit's direct reads plus its discoverable reads, skipping
 the wrapper names and the unlock names. A tool is a read when the toolkit's declared `tool_type(name)` says so: the
-`Tool` object a toolkit hands out need not carry the kind. A discoverable read is a candidate whether or not the gold
-run has unlocked it, because after the #329 fix a read is logged only when it is on the allowlist τ²-bench's runner
-derives from the gold run; a read the gold run already uses therefore carries no information about the fix, and one it
-never unlocks is the interesting case. Required argument names come from the tool's JSON schema, preferring the
-authoritative `openai_schema["function"]["parameters"]` when it carries a `properties` mapping, then `parameters` or
-`params` when one of those is a full schema. A bare parameter mapping is not a schema: the decorated function's
-signature then says which arguments are required and which are optional, and only when neither is available is every
-mapped name treated as required. Each required name must be supplied by an earlier gold call, wrapper `arguments`
-strings included; the insertion point is after the last call that supplied one, and never before the point where the
-run unlocks the tool. A discoverable read is called through `call_discoverable_agent_tool` with a JSON `arguments`
-string; when the run has not unlocked that tool before the insertion point, `unlock_discoverable_agent_tool` is
-inserted right before the read (`_insert_with_unlock`), so the variant is the gold run plus one block. The variant is
-kept only if replaying the prefix through the inserted read ends in a tool message that is not an error. Candidates
-are shuffled with `rng` and tried in that order, so a read that fails its replay never takes one of the five slots; the
+`Tool` object a toolkit hands out need not carry the kind, and `tool_type` answers for discoverable names too. A
+discoverable read is a candidate whether or not the gold run has unlocked it, because after the #329 fix a read is
+logged only when it is on the allowlist tau2's runner derives from the gold run; a read the gold run already uses
+therefore carries no information about the fix, and one it never unlocks is the interesting case. Required argument
+names come from the tool's JSON schema, preferring the authoritative `openai_schema["function"]["parameters"]` when it
+carries a `properties` mapping, then `parameters` or `params` when one of those is a full schema. A bare parameter
+mapping is not a schema: the callable's decorated signature then says which arguments are required (those with no
+default) and which are optional, and only when neither is available is every mapped name treated as required. That
+signature path is what serves discoverable reads, which are plain bound methods with no schema and no `.func`.
+
+Each required name must be supplied by an earlier gold call, wrapper `arguments` strings included; the insertion
+point is after the last call that supplied one. A discoverable read is called through `call_discoverable_agent_tool`
+with a JSON `arguments` string; when the run has not unlocked that tool before the insertion point,
+`unlock_discoverable_agent_tool` is inserted right before the read (`_insert_with_unlock`), so the variant is the gold
+run plus one block. The variant is kept only if replaying the prefix through the inserted read ends in a tool message
+that is not an error. Candidates are sorted by route, name and position and then shuffled with `rng`, with no priority
+by kind or route, so the draw is reproducible and a read that fails its replay never takes one of the five slots; the
 first five that run cleanly are the variants. `inserted_in_gold` is true when the inserted tool (the inner tool, for a
-wrapper) also appears in the gold run, and H1(a) counts those variants apart on both sides.
+wrapper) also appears in the gold run — the gold calls contribute their inner name for wrapper calls — and H1(a)
+counts those variants apart on both sides.
 
 **P3, respelled numbers.** Every numeric argument is respelled with the same value, integral `int` to `float` and
 integral `float` to `int`; a wrapper's JSON `arguments` string is rewritten token by token over its number literals, so
@@ -72,24 +87,30 @@ variant built: a check that did not complete is never reported as passed.
 **F1, an empty run.** Dropped when the gold run is also empty, since then it is the gold run itself; the task records
 `identical_to_gold`.
 
-**F3, a dropped write.** Only calls of kind `write`. The gold end state is replayed once; each write is dropped in turn
-and the variant kept only when the resulting agent and user hash pair differs from the gold run's. A write whose
+**F3, a dropped write.** Only calls of kind `write`. The gold end state is replayed once; each write is dropped in
+turn and the variant kept only when the resulting agent and user hash pair differs from the gold run's. A write whose
 removal changes nothing has nothing for the grader to catch: it gets no variant and is counted in `static_checks` as
 `no_effect_writes`. This is amendment 1.
 
-**F6, late verification.** Banking only, one variant per `log_verification` that is followed by at least one write, with
-that call moved to the end of the run.
+**F6, late verification.** Banking only, one variant per `log_verification` that is followed by at least one write,
+with that call moved to the end of the run.
 
 `build_variants` drops any variant whose calls equal the gold calls (amendment 3) and reports each skip; the suite
 keeps the relation ids sorted in the task's `identical_to_gold` list. A P5 relation that yields nothing is reported as
 `p5_not_inert`, because the generator builds one candidate and drops it only when the unknown call moved the live DB.
-`static_checks` replays the gold run and every write-removed run to produce `gold_errors` (S1), `gold_changes_db` (S2)
-and `no_effect_writes`.
+A P3 relation that yields nothing is reported only when the respelled calls equal the gold calls.
 
 A variant record's `checks` names the validity check that was applied to it (`inserted_ran_cleanly` for P1, `inert` for
 P5, `end_state_changed` for F3, empty otherwise). Candidates that failed their check never reach a record: they are
 dropped inside the generator or `build_variants`, and the reason survives as `p5_not_inert` or `no_effect_writes` in the
 task's static entry, or as a `relation_errors` entry when the check itself raised.
+
+## Static checks
+
+`static_checks(domain, task)` replays the gold run and every write-removed run, and returns `gold_errors` (S1: tool
+outputs with `error=True` or a wrapper `Error:` line), `gold_changes_db` (S2: the gold run's agent or user hash
+differs from a fresh environment's) and `no_effect_writes` (F3's filter). A static check that raises keeps the task
+record's shape: the three values are null and the exception sits beside them in `static_error`.
 
 ## Errors are outcomes, not verdicts
 
@@ -101,9 +122,7 @@ domain and relation. A tool call the live environment answers with an error outp
 in `live_call_errors` and in S1, not an error outcome. Both rules are amendment 2.
 
 At task level, a base run that raises gets a `static.base_error` and no variants, and a generator that raises is
-recorded in `static.relation_errors` under its relation id; neither aborts the task or the domain run. A static check
-that raises keeps the task record's shape: `gold_errors`, `gold_changes_db` and `no_effect_writes` are then null and
-the exception sits beside them in `static_error`.
+recorded in `static.relation_errors` under its relation id; neither aborts the task or the domain run.
 
 ## Fixtures: three fingerprints
 
@@ -118,10 +137,10 @@ Canonical JSON is `json.dumps(x, sort_keys=True, separators=(",", ":"), ensure_a
 H1 and out of the control. The comparison is per task rather than per file because `v1.0.1` edits banking's shared
 `db.json`.
 
-## Determinism and record hashing
+## Determinism, record hashing and digests
 
 Each task and relation gets `random.Random(f"{seed}:{task.id}:{relation}")`, so a seed fixes every sample and one
-task's list of tasks cannot shift another's draw. Variant records are serialised without `seconds`, sorted by
+task's draw cannot shift another's. Variant records are serialised without `seconds`, sorted by
 (`task_id`, `relation`, `detail`) and joined by newlines; `records_sha256` is the SHA-256 of that text. The comparison
 reduces each side's per-file hashes to `records_digest`: the integer value of the first 12 hex digits of the SHA-256 of
 the files' `records_sha256` values, sorted by domain (and file name) and joined by newlines. `records_sha256` covers
@@ -181,6 +200,8 @@ asserts it exactly.
   missing or that line is too short.
 - `records_sha256` covers variant records only: a repeated run that differs in a task's base outcome, gold output
   fingerprint or static checks keeps the same digest, so the digest is not a full per-case repeatability check.
+- Tool outputs are read as every second message from the end of a trajectory, which holds because the adapter appends
+  one call message and one tool message per call after the task's message history.
 - The static checks replay the gold run once per write, and every P1 candidate replays a prefix, so a suite run costs
   several replays per task.
 - The airline and retail control assumes those domains grade identically in both versions; a mismatch is treated as a
