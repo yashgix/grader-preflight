@@ -1,0 +1,12 @@
+[project]
+name = "grader-preflight"
+version = "0.1.0"
+description = "LLM-free preflight for graders of stateful tool environments"
+requires-python = ">=3.12,<3.14"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
