@@ -200,6 +200,31 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(metrics["h1b_held"], 0)
         self.assertEqual(metrics["unpaired_comparable"], 1)
 
+    def test_variants_with_different_calls_are_not_paired(self):
+        def read(value):
+            return [{"name": "read", "arguments": {"id": value}, "requestor": "assistant"}]
+
+        old_read = variant("A", "P1", detail="p1 read", reward=0.0, flagged=True, calls=read(1))
+        new_read = variant("A", "P1", detail="p1 read", reward=1.0, flagged=False, calls=read(2))
+        old = [record(BANK, [task("A")], [old_read], "old-sha")]
+        new = [record(BANK, [task("A")], [new_read], "new-sha")]
+
+        out, metrics = self.run_compare(old, new)
+        self.assertIn("H1(a): not held", out.read_text(encoding="utf-8"))
+        self.assertEqual(metrics["unpaired_comparable"], 2)
+
+    def test_a_gold_output_change_alone_marks_the_fixture_changed(self):
+        old_read = variant("A", "P1", reward=0.0, flagged=True)
+        new_read = variant("A", "P1", reward=1.0, flagged=False)
+        old = [record(BANK, [task("A", gold_fp="old-output")], [old_read], "old-sha")]
+        new = [record(BANK, [task("A", gold_fp="new-output")], [new_read], "new-sha")]
+
+        out, metrics = self.run_compare(old, new)
+        text = out.read_text(encoding="utf-8")
+        self.assertEqual((metrics["changed_tasks"], metrics["h1a_held"]), (1, 0))
+        self.assertEqual(metrics["unpaired_comparable"], 0)
+        self.assertIn("gold_output_fingerprint", text)
+
     def test_fixture_changed_tasks_are_excluded_from_h1_and_control(self):
         old_variant = variant("X", "F1", reward=1.0, flagged=True)
         new_variant = variant("X", "F1", reward=0.0, flagged=False)

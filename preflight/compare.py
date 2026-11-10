@@ -367,8 +367,8 @@ def _h1_line(label, data):
     fingerprint_diff = data["fp_diff"]
     return (
         f"{label}: {held} - paired verdicts: {paired}; "
-        f"OLD flagged pairs: {old_flags} ({old_names}); "
-        f"NEW flagged pairs: {new_flags} ({new_names}); "
+        f"OLD flagged tasks: {old_flags} ({old_names}); "
+        f"NEW flagged tasks: {new_flags} ({new_names}); "
         f"unpaired comparable: {unpaired}; "
         f"OLD errors: {old_errors}; NEW errors: {new_errors}; "
         f"output_fingerprints differ: {fingerprint_diff}; "
