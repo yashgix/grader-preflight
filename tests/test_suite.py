@@ -47,9 +47,7 @@ class FingerprintTest(unittest.TestCase):
             def model_dump(self, mode="json"):
                 return {"z": 1, "a": {"nested": [2, True]}}
 
-        expected = hashlib.sha256(
-            _canonical_json({"z": 1, "a": {"nested": [2, True]}}).encode("utf-8")
-        ).hexdigest()
+        expected = hashlib.sha256(_canonical_json({"z": 1, "a": {"nested": [2, True]}}).encode("utf-8")).hexdigest()
         self.assertEqual(task_fingerprint(_Task()), expected)
 
     def test_gold_fingerprint_exact_value(self):
@@ -110,8 +108,9 @@ class VariantRecordTest(unittest.TestCase):
 
     def test_flagged_verdict_gets_a_diff(self):
         variant = Variant("F1", (), False, "empty run")
-        with mock.patch("preflight.suite._reward", return_value=1.0), mock.patch(
-            "preflight.suite._db_diff", return_value=["balance"]
+        with (
+            mock.patch("preflight.suite._reward", return_value=1.0),
+            mock.patch("preflight.suite._db_diff", return_value=["balance"]),
         ):
             record = _variant_record(self.domain, self.task, variant, [None, None], None)
         self.assertEqual(record["outcome"], "verdict")
@@ -122,9 +121,7 @@ class VariantRecordTest(unittest.TestCase):
 
     def test_unflagged_verdict_has_no_diff(self):
         variant = Variant("F1", (), False, "empty run")
-        with mock.patch("preflight.suite._reward", return_value=0.0), mock.patch(
-            "preflight.suite._db_diff"
-        ) as diff:
+        with mock.patch("preflight.suite._reward", return_value=0.0), mock.patch("preflight.suite._db_diff") as diff:
             record = _variant_record(self.domain, self.task, variant, [None, None], None)
         self.assertEqual(record["outcome"], "verdict")
         self.assertFalse(record["flagged"])
@@ -134,10 +131,11 @@ class VariantRecordTest(unittest.TestCase):
     def test_variant_output_fingerprint_matches_its_tool_outputs(self):
         variant = Variant("P1", (Call("read", {}),), True, "extra read")
         messages = [_Message(), _Message(content='{"a": 25}')]
-        with mock.patch("preflight.suite.run", return_value=(messages, object())), mock.patch(
-            "preflight.suite.db_hashes", return_value=[None, None]
-        ), mock.patch("preflight.suite._reward", return_value=0.0), mock.patch(
-            "preflight.suite._db_diff", return_value=[]
+        with (
+            mock.patch("preflight.suite.run", return_value=(messages, object())),
+            mock.patch("preflight.suite.db_hashes", return_value=[None, None]),
+            mock.patch("preflight.suite._reward", return_value=0.0),
+            mock.patch("preflight.suite._db_diff", return_value=[]),
         ):
             record = _variant_record(self.domain, self.task, variant, [None, None], None)
         self.assertEqual(record["output_fingerprint"], output_fingerprint(['{"a": 25}']))
@@ -244,8 +242,9 @@ class RunSuiteTest(unittest.TestCase):
         self.assertEqual(task["static"]["base_error"], {"type": "RuntimeError", "message": "boom"})
 
     def test_relation_error_is_recorded_without_aborting_the_task(self):
-        with mock.patch("preflight.suite._reward", return_value=1.0), mock.patch(
-            "preflight.suite.build_variants", side_effect=RuntimeError("bad relation")
+        with (
+            mock.patch("preflight.suite._reward", return_value=1.0),
+            mock.patch("preflight.suite.build_variants", side_effect=RuntimeError("bad relation")),
         ):
             result = run_suite("airline", relations=["F1"], seed=0, limit=1)
         self.assertEqual(result["variants"], [])
@@ -258,8 +257,9 @@ class RunSuiteTest(unittest.TestCase):
         )
 
     def test_p5_not_inert_reaches_task_static(self):
-        with mock.patch("preflight.suite._reward", return_value=1.0), mock.patch(
-            "preflight.suite.build_variants", return_value=([], {"p5_not_inert": True})
+        with (
+            mock.patch("preflight.suite._reward", return_value=1.0),
+            mock.patch("preflight.suite.build_variants", return_value=([], {"p5_not_inert": True})),
         ):
             result = run_suite("airline", relations=["P5"], seed=0, limit=1)
         self.assertEqual(result["variants"], [])

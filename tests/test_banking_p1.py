@@ -66,9 +66,7 @@ class BankingP1Test(unittest.TestCase):
             self.assertIsInstance(json.loads(read.arguments["arguments"]), dict, variant.detail)
             inner = read.arguments.get("agent_tool_name")
             unlocked = [
-                call.arguments.get("agent_tool_name")
-                for call in variant.calls[:position]
-                if call.name == UNLOCK_AGENT
+                call.arguments.get("agent_tool_name") for call in variant.calls[:position] if call.name == UNLOCK_AGENT
             ]
             if len(block) == 2:
                 self.assertEqual(block[0].name, UNLOCK_AGENT, variant.detail)
