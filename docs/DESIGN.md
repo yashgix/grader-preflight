@@ -19,7 +19,7 @@ grader.
 | `preflight/tau2_adapter.py` | fixed: `Call`, `tasks`, `gold_calls`, `env_kwargs`, `fresh_env`, `run`, `grade`; replays calls on a live env and scores the trajectory |
 | `preflight/relations.py` | `tool_kind`, `Variant`, the six generators in `RELATIONS`, `build_variants`, `static_checks` |
 | `preflight/suite.py` | `run_suite`: base runs, variants, per-case records, fingerprints, provenance, `records_sha256` |
-| `preflight/compare.py` | `compare`: report and metrics from two result folders, standard library only |
+| `preflight/compare.py` | `compare`: case-by-case pairing, report and metrics from two result folders, standard library only |
 | `preflight/__main__.py` | CLI for `run` and `compare` |
 | `experiment.py` | the suite under both environments, then the comparison |
 | `demo.py` | a few airline tasks, printed |
@@ -47,7 +47,7 @@ A live tool message counts as an error when it has `error=True` or when its cont
 ## Relations and their validity filters
 
 The generators in `preflight/relations.py` build candidates; `build_variants` is the only entry point the suite uses,
-and it applies the rules that make an expected verdict defensible.
+and it drops any variant whose calls equal the gold calls (amendment 3), reporting each skip.
 
 **P1, an extra read.** `_p1_plans` collects the assistant toolkit's direct reads plus its discoverable reads, skipping
 the wrapper names and the unlock names. A tool is a read when the toolkit's declared `tool_type(name)` says so: the
@@ -59,7 +59,7 @@ names come from the tool's JSON schema, preferring the authoritative `openai_sch
 carries a `properties` mapping, then `parameters` or `params` when one of those is a full schema. A bare parameter
 mapping is not a schema: the callable's decorated signature then says which arguments are required (those with no
 default) and which are optional, and only when neither is available is every mapped name treated as required. That
-signature path is what serves discoverable reads, which are plain bound methods with no schema and no `.func`.
+signature path is what serves discoverable reads, plain bound methods with no schema and no `.func`.
 
 Each required name must be supplied by an earlier gold call, wrapper `arguments` strings included; the insertion
 point is after the last call that supplied one. A discoverable read is called through `call_discoverable_agent_tool`
@@ -95,10 +95,9 @@ removal changes nothing has nothing for the grader to catch: it gets no variant 
 **F6, late verification.** Banking only, one variant per `log_verification` that is followed by at least one write,
 with that call moved to the end of the run.
 
-`build_variants` drops any variant whose calls equal the gold calls (amendment 3) and reports each skip; the suite
-keeps the relation ids sorted in the task's `identical_to_gold` list. A P5 relation that yields nothing is reported as
-`p5_not_inert`, because the generator builds one candidate and drops it only when the unknown call moved the live DB.
-A P3 relation that yields nothing is reported only when the respelled calls equal the gold calls.
+The suite keeps the relation ids sorted in the task's `identical_to_gold` list. A P5 relation that yields nothing is
+reported as `p5_not_inert`, because the generator builds one candidate and drops it only when the unknown call moved
+the live DB. A P3 relation that yields nothing is reported only when the respelled calls equal the gold calls.
 
 A variant record's `checks` names the validity check that was applied to it (`inserted_ran_cleanly` for P1, `inert` for
 P5, `end_state_changed` for F3, empty otherwise). Candidates that failed their check never reach a record: they are
@@ -117,25 +116,29 @@ record's shape: the three values are null and the exception sits beside them in 
 A replay or grading exception on a variant, or on a base run, produces `outcome = "error"` with
 `error = {"type": <class name>, "message": <first line, at most 200 chars>}`, `reward = null` and `flagged = null`. A
 variant that raised while replaying carries no `end_state`; one that raised only in the grader keeps the hash pair it
-reached. Errors are never counted as rewards or flags: the comparison reports attempted = verdicts + errors for every
-domain and relation. A tool call the live environment answers with an error output is a fact about that call, recorded
-in `live_call_errors` and in S1, not an error outcome. Both rules are amendment 2.
+reached.
+
+Errors are never counted as rewards or flags: the comparison reports attempted = verdicts + errors for every domain
+and relation. A tool call the live environment answers with an error output is a fact about that call, recorded in
+`live_call_errors` and in S1, not an error outcome. Both rules are amendment 2.
 
 At task level, a base run that raises gets a `static.base_error` and no variants, and a generator that raises is
 recorded in `static.relation_errors` under its relation id; neither aborts the task or the domain run.
 
-## Fixtures: three fingerprints
+## Records and fingerprints
 
 - `task_fingerprint`: SHA-256 of the canonical JSON of `task.model_dump(mode="json")`.
 - `gold_fingerprint`: SHA-256 of the canonical JSON of the gold calls.
 - `gold_output_fingerprint`: SHA-256 of the gold run's tool outputs, each parsed as JSON where it parses, with every
   number that is not a boolean turned into a float, in canonical JSON. `25` and `25.0` therefore match, which matters
   because #397 changes number echoes on purpose.
+- `output_fingerprint` (per variant): the variant's live tool outputs, run through the same function, so a variant and
+the gold run can be compared on the state they produced as well as on the verdict. It is null when the variant raised
+before producing outputs.
 
-Canonical JSON is `json.dumps(x, sort_keys=True, separators=(",", ":"), ensure_ascii=True)`. `compare` marks a task
-"fixture changed" when its task fingerprint or its gold output fingerprint differs, naming which, and leaves it out of
-H1 and out of the control. The comparison is per task rather than per file because `v1.0.1` edits banking's shared
-`db.json`.
+Canonical JSON is `json.dumps(x, sort_keys=True, separators=(",", ":"), ensure_ascii=True)`. `end_state` is
+`{"variant": [agent hash, user hash], "gold": [agent hash, user hash]}`; `db_diff` names the top-level agent and user
+DB fields whose values differ from the gold run's, read through `env.tools.db` and `env.user_tools.db`.
 
 ## Determinism, record hashing and digests
 
@@ -151,13 +154,32 @@ per-case repeatability is checked against outside the project, from the per-case
 ## Comparison
 
 `compare(old_dir, new_dir, out_path)` reads only the JSON files, writes the Markdown report to `out_path`, writes
-`metrics.json` beside it, and returns the metrics object. The report holds, in order:
+`metrics.json` beside it, and returns the metrics object. Nothing is compared on totals alone.
 
-1. the old and new directories, then the fixture-changed tasks with the fingerprint that differs;
+### Pairing
+
+An OLD and a NEW variant are a pair when domain, `task_id`, `relation`, `detail` and the canonical JSON of `calls` are
+all equal; duplicates under one key are paired in sorted order, the leftovers are unpaired. A task is comparable when
+it is present on both sides and its `task_fingerprint` and `gold_output_fingerprint` are equal; otherwise it is
+listed as fixture changed, with the fingerprint that differs, and left out of the hypotheses and of the control. A
+task present on one side only is listed; in banking it counts as not comparable, in airline and retail it fails the
+control.
+
+A variant on a comparable task with no counterpart is unpaired: it is listed, counted in `unpaired_comparable`, fails
+the control in airline and retail, and in banking it makes the H1 part of its relation not held (for P1, only when
+the variant is not `inserted_in_gold`).
+
+### Report
+
+The report holds, in order:
+
+1. the old and new directories, then the fixture-changed tasks with the fingerprint that differs, then one-sided tasks
+   and unpaired comparable variants;
 2. a table per domain and relation on each side: attempted, verdicts, errors, flagged variants and flagged tasks;
 3. the same table for P1 split by `inserted_in_gold` (`in gold`, `not in gold`);
 4. the flags present on OLD and absent on NEW, by task and relation;
-5. one line each for H1(a), H1(b) and H2, starting `held` or `not held`, with the numbers behind them;
+5. one line each for H1(a), H1(b) and H2, starting `held` or `not held`, with the numbers behind them, the `db_diff`
+   field sets of the H1 part's OLD flags with their counts, and how many of its pairs differ in `output_fingerprint`;
 6. the control line and its mismatches;
 7. F1 counts per side, domain and `gold_changes_db` (`unknown` when the task has no boolean static entry), with
    attempted, verdicts, errors, passed variants and passed tasks;
@@ -165,26 +187,29 @@ per-case repeatability is checked against outside the project, from the per-case
 9. `p5_not_inert` tasks and `no_effect_writes` per side and domain;
 10. the `records_sha256` of every input file.
 
-Only verdicts count toward held or not held; errors are printed beside them. The checks themselves are as
-pre-registered:
+### Checks
 
-- H1(a): OLD P1 flags at least one banking task and NEW flags none, on both sides counting only variants without
-  `inserted_in_gold`, and ignoring tasks whose fixture changed. NEW must have produced at least one verdict in that
-  group: a run where every comparable NEW variant errored has not shown a fix.
-- H1(b): the same for P3, likewise with at least one NEW verdict.
+Only verdicts count toward held or not held; errors are printed beside them.
+
+- H1(a): on comparable banking tasks, counting P1 pairs whose variants are not `inserted_in_gold` on either side, at
+  least one pair is flagged on OLD, no pair is flagged on NEW, NEW produced at least one verdict in that group, and
+  no unpaired comparable variant belongs to it.
+- H1(b): the same for P3.
 - H2: F3 pass rate at most 1%, at least 20 airline tasks where an empty run passes, F6 passing on at least half of the
-  banking tasks that have an F6 variant, and at least one flagged P-relation variant. A part with no verdict behind it
-  is not held.
-- Control: on airline and retail tasks with an identical fixture, every variant matched by (task, relation, `detail`)
-  has the same outcome and the same reward on both sides. Any mismatch fails the control and invalidates the run until
-  it is explained; a variant present on one side only is listed as missing.
+  banking tasks that have an F6 verdict, and at least one flagged P-relation variant on NEW. A part with no verdict
+  behind it is not held.
+- Control: on airline and retail, every task is on both sides with an identical fixture, every variant is paired, and
+  each pair has the same outcome and the same reward. Any mismatch fails the control and invalidates the run until it
+  is explained.
+
+### Metrics
 
 `metrics.json` is a flat object of numbers only, never booleans, with a fixed key set: `h1a_held`, `h1b_held`,
 `h2_held`, `control_passed`, `control_mismatches`, `p1_flagged_tasks_old`, `p1_flagged_tasks_new`,
 `p1_in_gold_flagged_tasks_new`, `p3_flagged_tasks_old`, `p3_flagged_tasks_new`, `f1_pass_airline_new`,
 `f3_pass_rate_new`, `f6_pass_share_new`, `changed_tasks`, `attempted_old`, `attempted_new`, `errors_old`, `errors_new`,
-`records_digest_old`, `records_digest_new`. The key set is fixed so that published numbers stay comparable, and a test
-asserts it exactly.
+`unpaired_comparable`, `records_digest_old`, `records_digest_new`. The key set is fixed so that published numbers stay
+comparable, and a test asserts it exactly.
 
 ## Known limits
 
@@ -195,11 +220,12 @@ asserts it exactly.
   arguments appear in the run, an empty gold run. Counts therefore differ from task to task.
 - F1 cannot separate an empty run from a gold run that does not change the DB, so its counts are reported split by
   `gold_changes_db`; empty-gold tasks get no F1 at all (amendment 3).
-- `end_state` is a pair of DB hashes; `db_diff` names top-level fields that differ, not the values inside them.
+- `end_state` is a pair of DB hashes; `db_diff` names top-level fields, not the values inside them.
 - `tau2_version` is the second word of the first line of the environment's `SOURCE.txt`, and is null when the file is
   missing or that line is too short.
-- `records_sha256` covers variant records only: a repeated run that differs in a task's base outcome, gold output
-  fingerprint or static checks keeps the same digest, so the digest is not a full per-case repeatability check.
+- `records_sha256` and the side digests cover variant records only: a repeated run that differs in a task's base
+  outcome, gold output fingerprint or static checks keeps the same digest, so the digest is not a full per-case
+  repeatability check.
 - Tool outputs are read as every second message from the end of a trajectory, which holds because the adapter appends
   one call message and one tool message per call after the task's message history.
 - The static checks replay the gold run once per write, and every P1 candidate replays a prefix, so a suite run costs

@@ -267,6 +267,7 @@ def _variant_record(domain, task, variant: Variant, gold_state, gold_env):
         "calls": calls_as_dicts(variant.calls),
         "checks": _checks(variant.relation),
         "live_call_errors": [],
+        "output_fingerprint": None,
         "end_state": None,
         "outcome": "error",
         "reward": None,
@@ -277,6 +278,8 @@ def _variant_record(domain, task, variant: Variant, gold_state, gold_env):
     try:
         messages, env = run(domain, task, list(variant.calls))
         record["live_call_errors"] = _live_call_errors(messages, len(variant.calls))
+        outputs = [_content(message) for message in _tool_outputs(messages, len(variant.calls))]
+        record["output_fingerprint"] = output_fingerprint(outputs)
         record["end_state"] = {"variant": db_hashes(env), "gold": list(gold_state)}
         reward = float(_reward(domain, task, messages))
     except Exception as exc:

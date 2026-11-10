@@ -9,10 +9,17 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+# The fake refuses to write a result unless the offline flag reached it, so the runner's
+# environment propagation is what makes the experiment tests pass at all.
 FAKE_PYTHON = """#!{python}
 import json
+import os
 import sys
 from pathlib import Path
+
+flag = os.environ.get("LITELLM_LOCAL_MODEL_COST_MAP")
+if flag != "True":
+    sys.exit(f"LITELLM_LOCAL_MODEL_COST_MAP is {{flag!r}}, expected 'True'")
 
 args = sys.argv[1:]
 domain = args[args.index("--domain") + 1]
@@ -90,6 +97,14 @@ class ExperimentTest(unittest.TestCase):
         self.assertEqual(files, expected)
         metrics = json.loads(self.out.read_text(encoding="utf-8"))
         self.assertEqual(metrics["control_passed"], 1)
+
+    def test_subprocesses_receive_the_offline_flag(self):
+        self.run_experiment()
+        metrics = json.loads((self.out.parent / "metrics.json").read_text(encoding="utf-8"))
+        self.assertEqual(metrics["attempted_old"], 3)
+        self.assertEqual(metrics["attempted_new"], 3)
+        self.assertEqual(metrics["errors_old"], 0)
+        self.assertEqual(metrics["errors_new"], 0)
 
     def test_two_runs_give_identical_metrics(self):
         self.run_experiment()

@@ -20,7 +20,10 @@ from preflight.relations import (
 )
 from preflight.tau2_adapter import DOMAINS, Call, fresh_env, gold_calls, run, tasks
 
-NAME_KEY = {"call_discoverable_agent_tool": "agent_tool_name", "call_discoverable_user_tool": "discoverable_tool_name"}
+NAME_KEY = {
+    "call_discoverable_agent_tool": "agent_tool_name",
+    "call_discoverable_user_tool": "discoverable_tool_name",
+}
 DECLARED = {"read", "write", "generic", "think"}
 
 
@@ -67,7 +70,7 @@ def same_calls(left, right):
 
 
 def read_positions(gold, calls):
-    """Positions of the inserted read in a variant that is the gold run plus one block (an unlock and the read)."""
+    """Positions of the inserted read in a variant that is the gold run plus one inserted block."""
     positions = []
     for index in range(len(calls)):
         for size in (1, 2):
@@ -127,6 +130,26 @@ def find_verification_task(scan=30):
     return None
 
 
+class _HashEnv:
+    """A stand-in for a live environment: only the two documented hash methods."""
+
+    def __init__(self, agent_hash, user_hash):
+        self.agent_hash = agent_hash
+        self.user_hash = user_hash
+
+    def get_db_hash(self):
+        return self.agent_hash
+
+    def get_user_db_hash(self):
+        return self.user_hash
+
+
+class _Message:
+    def __init__(self, content=None, error=False):
+        self.content = content
+        self.error = error
+
+
 class RelationsTableTest(unittest.TestCase):
     def test_all_relations_are_registered(self):
         self.assertEqual(sorted(RELATIONS), ["F1", "F3", "F6", "P1", "P3", "P5"])
@@ -150,19 +173,17 @@ class ToolKindTest(unittest.TestCase):
                 self.assertIn(tool_kind(env, Call(name, {}, "user")), DECLARED, f"{domain} {name}")
 
     def test_wrapper_resolves_to_the_inner_tool(self):
+        pairs = [("call_discoverable_agent_tool", "tools"), ("call_discoverable_user_tool", "user_tools")]
         for domain in DOMAINS:
             env = fresh_env(domain, tasks(domain)[0])
-            for wrapper, target_attr in (
-                ("call_discoverable_agent_tool", "tools"),
-                ("call_discoverable_user_tool", "user_tools"),
-            ):
-                names = toolkit_names(env, target_attr)
+            for wrapper, target in pairs:
+                names = toolkit_names(env, target)
                 if wrapper not in names:
                     continue
                 inner = next((name for name in names if name != wrapper), None)
                 if inner is None:
                     continue
-                requestor = "user" if target_attr == "user_tools" else "assistant"
+                requestor = "user" if target == "user_tools" else "assistant"
                 wrapped = Call(wrapper, {NAME_KEY[wrapper]: inner, "arguments": "{}"})
                 self.assertEqual(tool_kind(env, wrapped), tool_kind(env, Call(inner, {}, requestor)))
 
@@ -209,10 +230,10 @@ class P1CandidateTest(unittest.TestCase):
         def ran_cleanly(domain, task, calls, position):
             return calls[position].name not in failing
 
-        with mock.patch("preflight.relations.gold_calls", return_value=[Call("write_a", {})]), mock.patch(
-            "preflight.relations._p1_plans", return_value=plans
-        ), mock.patch("preflight.relations._ran_cleanly", side_effect=ran_cleanly):
-            variants = p1_extra_read("airline", object(), random.Random(0))
+        with mock.patch("preflight.relations.gold_calls", return_value=[Call("write_a", {})]):
+            with mock.patch("preflight.relations._p1_plans", return_value=plans):
+                with mock.patch("preflight.relations._ran_cleanly", side_effect=ran_cleanly):
+                    variants = p1_extra_read("airline", object(), random.Random(0))
 
         self.assertEqual(len(variants), 5)
         for variant in variants:
@@ -223,10 +244,10 @@ class P1CandidateTest(unittest.TestCase):
         expected = list(plans)
         random.Random(0).shuffle(expected)
 
-        with mock.patch("preflight.relations.gold_calls", return_value=[Call("write_a", {})]), mock.patch(
-            "preflight.relations._p1_plans", return_value=list(plans)
-        ), mock.patch("preflight.relations._ran_cleanly", return_value=True):
-            variants = p1_extra_read("airline", object(), random.Random(0))
+        with mock.patch("preflight.relations.gold_calls", return_value=[Call("write_a", {})]):
+            with mock.patch("preflight.relations._p1_plans", return_value=list(plans)):
+                with mock.patch("preflight.relations._ran_cleanly", return_value=True):
+                    variants = p1_extra_read("airline", object(), random.Random(0))
 
         inserted = [variant.calls[0].name for variant in variants]
         self.assertEqual(inserted, [plan[1] for plan in expected[:5]])
@@ -237,10 +258,10 @@ class P1CandidateTest(unittest.TestCase):
             Call("get_details", {"account_id": "A1"}),
         ]
         plans = [("agent", "get_details", 1, {"account_id": "A1"})]
-        with mock.patch("preflight.relations.gold_calls", return_value=gold), mock.patch(
-            "preflight.relations._p1_plans", return_value=plans
-        ), mock.patch("preflight.relations._ran_cleanly", return_value=True):
-            variants = p1_extra_read("banking_knowledge", object(), random.Random(0))
+        with mock.patch("preflight.relations.gold_calls", return_value=gold):
+            with mock.patch("preflight.relations._p1_plans", return_value=plans):
+                with mock.patch("preflight.relations._ran_cleanly", return_value=True):
+                    variants = p1_extra_read("banking_knowledge", object(), random.Random(0))
 
         self.assertEqual(len(variants), 1)
         calls = variants[0].calls
@@ -255,10 +276,10 @@ class P1CandidateTest(unittest.TestCase):
     def test_an_unseen_discoverable_read_gets_its_unlock_first(self):
         gold = [Call("get_account", {"account_id": "A1"})]
         plans = [("agent", "get_details", 1, {"account_id": "A1"})]
-        with mock.patch("preflight.relations.gold_calls", return_value=gold), mock.patch(
-            "preflight.relations._p1_plans", return_value=plans
-        ), mock.patch("preflight.relations._ran_cleanly", return_value=True):
-            variants = p1_extra_read("banking_knowledge", object(), random.Random(0))
+        with mock.patch("preflight.relations.gold_calls", return_value=gold):
+            with mock.patch("preflight.relations._p1_plans", return_value=plans):
+                with mock.patch("preflight.relations._ran_cleanly", return_value=True):
+                    variants = p1_extra_read("banking_knowledge", object(), random.Random(0))
 
         self.assertEqual(len(variants), 1)
         calls = variants[0].calls
@@ -415,26 +436,12 @@ class P5Test(unittest.TestCase):
         self.assertEqual(inserted[0].requestor, "assistant")
 
 
-class _HashEnv:
-    def __init__(self, agent_hash, user_hash):
-        self.agent_hash = agent_hash
-        self.user_hash = user_hash
-
-    def get_db_hash(self):
-        return self.agent_hash
-
-    def get_user_db_hash(self):
-        return self.user_hash
-
-
 class P5InertnessTest(unittest.TestCase):
     def _build(self, before, after):
-        gold = [Call("some_call", {})]
         responses = [([], _HashEnv(*before)), ([], _HashEnv(*after))]
-        with mock.patch("preflight.relations.gold_calls", return_value=gold), mock.patch(
-            "preflight.relations.run", side_effect=responses
-        ):
-            return build_variants("P5", "airline", object(), random.Random(0))
+        with mock.patch("preflight.relations.gold_calls", return_value=[Call("some_call", {})]):
+            with mock.patch("preflight.relations.run", side_effect=responses):
+                return build_variants("P5", "airline", object(), random.Random(0))
 
     def test_inert_unknown_call_keeps_the_variant(self):
         variants, notes = self._build(("agent", "user"), ("agent", "user"))
@@ -452,12 +459,10 @@ class P5InertnessTest(unittest.TestCase):
         self.assertTrue(notes.get("p5_not_inert"))
 
     def test_a_failed_inertness_check_is_not_reported_as_inert(self):
-        gold = [Call("some_call", {})]
-        with mock.patch("preflight.relations.gold_calls", return_value=gold), mock.patch(
-            "preflight.relations.run", side_effect=RuntimeError("replay")
-        ):
-            with self.assertRaises(RuntimeError):
-                build_variants("P5", "airline", object(), random.Random(0))
+        with mock.patch("preflight.relations.gold_calls", return_value=[Call("some_call", {})]):
+            with mock.patch("preflight.relations.run", side_effect=RuntimeError("replay")):
+                with self.assertRaises(RuntimeError):
+                    build_variants("P5", "airline", object(), random.Random(0))
 
 
 class F1Test(unittest.TestCase):
@@ -549,18 +554,10 @@ class StaticChecksTest(unittest.TestCase):
             self.skipTest("no task replayed cleanly in any domain")
 
     def test_gold_errors_counts_flagged_and_wrapper_errors(self):
-        class _Message:
-            def __init__(self, content=None, error=False):
-                self.content = content
-                self.error = error
-
         messages = [_Message(), _Message(error=True), _Message(), _Message(content="Error: no such tool")]
-        with mock.patch("preflight.relations.gold_calls", return_value=[Call("a", {}), Call("b", {})]), mock.patch(
-            "preflight.relations.run", return_value=(messages, _HashEnv("agent", "user"))
-        ), mock.patch("preflight.relations._calls_of_kind", return_value=[]), mock.patch(
-            "preflight.relations.fresh_env", return_value=_HashEnv("other", "other")
-        ):
-            checks = static_checks("airline", tasks("airline")[0])
+        with mock.patch("preflight.relations.gold_calls", return_value=[Call("a", {}), Call("b", {})]):
+            with mock.patch("preflight.relations.run", return_value=(messages, _HashEnv("agent", "user"))):
+                checks = static_checks("airline", tasks("airline")[0])
 
         self.assertEqual(checks["gold_errors"], 2)
         self.assertTrue(checks["gold_changes_db"])

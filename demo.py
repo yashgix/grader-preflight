@@ -76,6 +76,7 @@ def _print_example(result: dict) -> None:
         f"outcome {variant['outcome']}, reward {variant['reward']}, flagged {variant['flagged']}, "
         f"live call errors {variant['live_call_errors']}"
     )
+    print(f"called checks {variant['checks']}, output fingerprint {variant['output_fingerprint']}")
     if variant["db_diff"]:
         print(f"db fields that differ from the gold run: {', '.join(variant['db_diff'])}")
 

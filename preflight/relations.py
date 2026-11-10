@@ -182,7 +182,7 @@ def _schema(tool) -> dict:
         except Exception:
             schema = None
     function = schema.get("function") if isinstance(schema, dict) else None
-    parameters = (function or {}).get("parameters")
+    parameters = function.get("parameters") if isinstance(function, dict) else None
     if isinstance(parameters, dict):
         candidates.append(parameters)
     for attr in ("parameters", "params"):
@@ -302,9 +302,8 @@ def _unlocked_before(gold: list[Call], name: str, position: int) -> bool:
     return False
 
 
-def _insert_with_unlock(
-    gold: list[Call], route: str, name: str, position: int, arguments: dict
-) -> tuple[tuple[Call, ...], int]:
+def _insert_with_unlock(gold: list[Call], route: str, name: str, position: int, arguments: dict):
+    """The read in place, preceded by its unlock when the gold run has not unlocked it before."""
     read = _inserted_read(route, name, arguments)
     if route == "agent" and not _unlocked_before(gold, name, position):
         unlock = Call(UNLOCK_AGENT, {"agent_tool_name": name})
@@ -381,7 +380,7 @@ def _respell_json(text: str) -> str:
             out.append(char)
             if escaped:
                 escaped = False
-            elif char == chr(92):
+            elif char == "\\":
                 escaped = True
             elif char == '"':
                 in_string = False
@@ -400,8 +399,7 @@ def _respell_json(text: str) -> str:
                 continue
         out.append(char)
         index += 1
-    respelled = "".join(out)
-    return respelled if respelled != text else text
+    return "".join(out)
 
 
 def _respell_call(call: Call) -> Call:

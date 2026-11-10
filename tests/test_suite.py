@@ -17,7 +17,7 @@ from preflight.suite import (
     run_suite,
     task_fingerprint,
 )
-from preflight.tau2_adapter import Call, tasks
+from preflight.tau2_adapter import Call, gold_calls, run, tasks
 
 
 def _canonical_json(value):
@@ -96,6 +96,12 @@ class RecordsHashTest(unittest.TestCase):
         self.assertNotEqual(_records_sha256([record]), _records_sha256([{**record, "reward": 1.0}]))
 
 
+class _Message:
+    def __init__(self, content=None, error=False):
+        self.content = content
+        self.error = error
+
+
 class VariantRecordTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -125,6 +131,17 @@ class VariantRecordTest(unittest.TestCase):
         self.assertIsNone(record["db_diff"])
         diff.assert_not_called()
 
+    def test_variant_output_fingerprint_matches_its_tool_outputs(self):
+        variant = Variant("P1", (Call("read", {}),), True, "extra read")
+        messages = [_Message(), _Message(content='{"a": 25}')]
+        with mock.patch("preflight.suite.run", return_value=(messages, object())), mock.patch(
+            "preflight.suite.db_hashes", return_value=[None, None]
+        ), mock.patch("preflight.suite._reward", return_value=0.0), mock.patch(
+            "preflight.suite._db_diff", return_value=[]
+        ):
+            record = _variant_record(self.domain, self.task, variant, [None, None], None)
+        self.assertEqual(record["output_fingerprint"], output_fingerprint(['{"a": 25}']))
+
     def test_a_raising_grader_is_an_error_not_a_reward(self):
         variant = Variant("F1", (), False, "empty run")
         with mock.patch("preflight.suite._reward", side_effect=RuntimeError("boom")):
@@ -144,6 +161,7 @@ class VariantRecordTest(unittest.TestCase):
         self.assertIsNone(record["reward"])
         self.assertIsNone(record["flagged"])
         self.assertIsNone(record["db_diff"])
+        self.assertIsNone(record["output_fingerprint"])
 
 
 class _DB:
@@ -167,6 +185,12 @@ class DbDiffTest(unittest.TestCase):
         left = _Env({"a": None}, {})
         right = _Env({}, {})
         self.assertEqual(_db_diff(left, right), ["a"])
+
+    def test_real_banking_gold_run_diff_is_non_empty(self):
+        task = tasks("banking_knowledge")[0]
+        gold_env = run("banking_knowledge", task, gold_calls(task))[1]
+        empty_env = run("banking_knowledge", task, [])[1]
+        self.assertNotEqual(_db_diff(empty_env, gold_env), [])
 
 
 class RunSuiteTest(unittest.TestCase):

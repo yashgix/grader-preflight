@@ -1,1 +1,1 @@
-"""LLM-free preflight checks for graders of stateful tool environments."""
+"""LLM-free preflight: edited gold runs checked against a live tool environment's own grader."""
