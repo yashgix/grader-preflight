@@ -119,3 +119,34 @@ control that would expose a broken harness.
   does not (where an end-state grader cannot tell an empty run apart).
 - **Reproducibility.** Each result file records the tau2 commit, the `uv.lock` hash, the Python version and the
   seed. The suite is run twice per version; the two runs must be identical apart from timings.
+
+### 2. Errors, per-case evidence and fixture identity (9 Nov 2026, before any relation run)
+
+Reason: an independent review of amendment 1 found that a grading or replay exception would have been scored as
+reward 0 (a false flag), that a totals-only repeatability check can hide changes that cancel out, and that the
+cross-version control needs a stated test of "identical fixture". Checking the data showed that `v1.0.1` edits
+banking's shared `db.json` (answer-leaking transaction descriptions removed, two rows swapped for #403), so the test
+must be per task, not per file.
+
+- **Errors are outcomes, not verdicts.** Each variant (and each base run) ends as either a verdict (reward 0 or 1) or
+  an error (the grader or replay raised), recorded with its exception type and first line. Errors are never counted
+  as rewards or flags and never dropped: every count reports attempted = verdicts + errors, per domain and relation.
+  A tool call that the live environment answers with an error output is a recorded fact about that call, not an
+  error outcome.
+- **Fixture identity, per task.** A task is comparable across versions only if (a) its definition is identical
+  (canonical JSON of the whole task) and (b) the gold run's tool outputs are identical once JSON is parsed and every
+  number is read as a float (so `25` and `25.0` match; #397 changes number echoes on purpose). Tasks that fail
+  either part are listed as "fixture changed", with the part that differed, and are left out of H1 and the control.
+  They are still run and reported per version.
+- **Per-case evidence.** Every variant record keeps its exact calls, its validity checks (P1 inserted call ran
+  cleanly; P5 inert; F3 end state changed), the live call errors, the end-state hashes of the variant and the gold
+  run, the outcome, reward, flag and DB diff. Each result file records the tau2 source, `uv.lock` hash, Python
+  version, seed, and the task's `reward_basis`.
+- **Per-case repeatability.** Records are serialised deterministically (sorted keys, no whitespace, sorted by
+  domain, task, relation and detail; timings left out) and hashed with SHA-256. The full hash is kept with the
+  evidence; a 48-bit integer prefix goes into the numbers-only metrics, so the required two identical runs cover
+  every case, not only totals.
+- **Independent check.** The aggregate metrics are recomputed from the per-case records by a check that does not use
+  the project's own `compare` code, before any result is reported.
+- **Protocol frozen.** After this amendment the protocol changes only on new evidence, through a further dated
+  amendment that states that evidence.
