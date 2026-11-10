@@ -187,3 +187,25 @@ consequences for this protocol:
 Disclosure: while finding this, task_043 was graded with one repeated gold read and with four base-toolkit reads
 inserted (all scored 1 on both versions, under the old adapter). No variant with an unlocked new read was graded.
 Rechecked after the change: the gold run still scores 1 on all 252 DB-graded tasks under both versions.
+
+### 5. Phase 2 details fixed before any phase 2 run (10 Nov 2026, after the phase 1 results)
+
+Written after the phase 1 results were seen; hypotheses H3 and H4 and every threshold are unchanged.
+
+- **Task pool.** The banking split (30 train, 10 held-out, seed 20261110) is drawn from the 62 tasks that are
+  comparable across versions under amendment 2's fixture rule, not from all 88. A changed task differs in data as
+  well as grader, which would confound the paired comparison.
+- **H4's "verification-read rate" is the extra-read rate:** READ actions the gold run does not make, per episode.
+  No banking gold run has a read before `log_verification` (identity is checked in conversation, not with tool
+  calls), so the reads G_old can punish are extra reads, the #329 mechanism. H4 measures whether a grader flaw
+  discourages harmless extra lookups; it says nothing about identity checking.
+- **The RL gate's wording.** "Within 2,000 episodes" means 2,000 training episodes in all, over the 30 train tasks,
+  judged on mean true success over episodes 1,701 to 2,000, averaged over seeds. The 0.8 threshold is unchanged.
+- **An exploratory third condition, `G_proc`:** G_new plus an order check (each `log_verification` before the writes
+  it gates). It was a baseline in the original design notes and is motivated by phase 1's F6 result (79 of 79
+  late-verification variants accepted by both graders). Reported apart, never part of H3 or H4.
+- **Fixed parameters.** Undiscounted REINFORCE; 3,000 training episodes per run; held-out evaluation 100 episodes
+  per task; measures on the last 300 training episodes. Every action keeps the gold run's number spelling, so #397
+  cannot differ between conditions.
+- **Feasibility first.** A trial (5 train tasks, 3 seeds, G_old and G_new) checks learning against a random policy
+  and measures runtime before the full sweep. It is feasibility evidence only and is not used for any hypothesis.
