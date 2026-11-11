@@ -209,3 +209,28 @@ Written after the phase 1 results were seen; hypotheses H3 and H4 and every thre
   cannot differ between conditions.
 - **Feasibility first.** A trial (5 train tasks, 3 seeds, G_old and G_new) checks learning against a random policy
   and measures runtime before the full sweep. It is feasibility evidence only and is not used for any hypothesis.
+
+### 6. Full-sweep settings and an exploratory post-trial measure (10 Nov 2026, after the feasibility trial, before the full run)
+
+Written after the feasibility trial (5 tasks, 3 seeds) was seen. H3, H4 and every threshold are unchanged.
+
+- **Tuning, retail only.** Learning rate from {0.03, 0.1, 0.3}, seeds 0-2, 2,000 episodes, on 30 retail tasks whose
+  empty run fails (drawn with seed 20261110); the rate with the highest mean true success over the last 300
+  episodes, a tie going to the smaller one. The same rate and settings for every grader.
+- **The sweep.** Seeds 0-9 for each of G_old, G_new and G_proc, 3,000 episodes on the 30 train tasks; a random
+  policy per seed; held-out tasks: 100 sampled episodes per task from the final policy, without learning. Every seed
+  is reported, converged or not (converged: true success above 0.8 on the last 300 episodes). Nothing is excluded.
+- **Intervals and H4's "no gain".** Means over seeds with percentile bootstrap intervals (10,000 resamples, seed
+  20261110). "No gain in true success" means the 95% interval of the paired difference (G_old minus G_new) does
+  not lie entirely above 0.
+- **H3's classes.** A late verification (order violation) is F6's class, which phase 1 flagged on both graders. An
+  altered write, or anything else, has no phase 1 relation and counts as a miss. With no finds, H3 holds trivially,
+  and the report says so.
+- **Exploratory, post-trial, not a hypothesis test.** Per seed, the greedy policy (its most likely action at every
+  step, no learning) on the train tasks: completion rate, whether it stops right after the gold steps, its extra
+  lookups after them (out of the 3 spare slots) and its STOP probability there, with the G_old minus G_new
+  difference. Each version's verdict on the gold run followed by 0 to 3 extra lookups, to tell tolerance (the same
+  verdict with or without them) from punishment; a 0/1 verdict cannot reward them more. The trial motivated this:
+  lookups under G_new came after the task was done, and non-converged G_old seeds confounded the training mean.
+- **Reading the results.** Every grader has the same actions and the same 3 spare slots, so differences between
+  graders are reward-induced; how many lookups fit after the task is done is set by the spare slots, not the grader.
