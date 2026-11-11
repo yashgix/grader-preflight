@@ -232,5 +232,12 @@ Written after the feasibility trial (5 tasks, 3 seeds) was seen. H3, H4 and ever
   difference. Each version's verdict on the gold run followed by 0 to 3 extra lookups, to tell tolerance (the same
   verdict with or without them) from punishment; a 0/1 verdict cannot reward them more. The trial motivated this:
   lookups under G_new came after the task was done, and non-converged G_old seeds confounded the training mean.
+- **Details fixed after an independent review of the sweep code, still before the run.** Evaluation: per task, 1
+  greedy and 100 sampled episodes from the final policy, on train and held-out tasks. H3 counts the training episodes
+  of G_old and G_new only; distinct means the same task and the same ordered calls; an episode whose G_new grading
+  raised is left out and counted. Its classes: G_new rejects it (a miss); a late verification alone (F6's class,
+  flagged); an altered write, or both checks failing (a miss). An extra read is a read of a tool the gold run never
+  calls (the reads #329 logs); a repeated read of a gold tool is not one, as P1 counts `inserted_in_gold` apart. If
+  the gate fails, H3 and H4 are reported as not tested, since the pre-registration keeps RL only when it passes.
 - **Reading the results.** Every grader has the same actions and the same 3 spare slots, so differences between
   graders are reward-induced; how many lookups fit after the task is done is set by the spare slots, not the grader.
