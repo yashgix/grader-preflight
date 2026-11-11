@@ -1,4 +1,4 @@
-"""Offline demo: phase 1 relations on a few tasks, or a short phase 2 smoke training run printed as metrics."""
+"""Offline demo: phase 1 relations on a few tasks, a short phase 2 training run, or a synthetic phase 3 audit."""
 
 import argparse
 import json
@@ -12,7 +12,7 @@ os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="demo.py", description=__doc__)
-    parser.add_argument("--phase", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--phase", type=int, choices=(1, 2, 3), default=1)
     parser.add_argument("--domain", default="airline", help="phase 1 domain")
     parser.add_argument("--limit", type=int, default=5, help="tasks to run")
     parser.add_argument("--seed", type=int, default=0)
@@ -116,8 +116,38 @@ def _phase2(args) -> int:
     return 0
 
 
+def _phase3(args) -> int:
+    """Gold banking runs as a tau2 results file, regraded here; synthetic, so no real trajectory is read."""
+    from preflight import phase3, trajectories
+
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(temporary)
+        files = folder / "files"
+        files.mkdir()
+        path = files / f"{phase3.BANK}.json"
+        task_dicts, simulations = [], []
+        for task in phase3.tasks(phase3.BANK)[: args.limit]:
+            task_dicts.append(phase3._task_dict(task))
+            simulations.append(trajectories.as_simulation(phase3.BANK, task, phase3.gold_calls(task), trial=0))
+        phase3._write_results(path, phase3.BANK, task_dicts, simulations)
+        (written,) = trajectories.regrade([path], folder / "regrade")
+        records = [json.loads(line) for line in written.read_text(encoding="utf-8").splitlines() if line.strip()]
+    print(f"phase 3 demo: {len(records)} synthetic banking runs, tau2 {trajectories.version_label()}")
+    for record in records:
+        print(
+            f"  {record['task_id']}: replay {record['replay_class']}, reward {record['reward']}, "
+            f"calls {record['n_calls']}, task matches {record['task_matches']}"
+        )
+    full = sum(1 for record in records if record["replay_class"] == "full")
+    accepted = sum(1 for record in records if record["reward"] == 1.0)
+    print(f"full replays {full} of {len(records)}, verdicts of 1 {accepted}")
+    return 0
+
+
 def main(argv=None) -> int:
     args = _parser().parse_args(argv)
+    if args.phase == 3:
+        return _phase3(args)
     return _phase2(args) if args.phase == 2 else _phase1(args)
 
 

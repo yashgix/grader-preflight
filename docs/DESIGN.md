@@ -6,8 +6,9 @@ Every verdict in this project is the DB-state verdict of `EnvironmentEvaluator.c
 the environment arguments τ²-bench's runner uses for the task. Tasks are those with `DB` in `reward_basis`; the
 COMMUNICATE, NL_ASSERTION and ACTION terms are never the subject of a variant. Phase 1 covers `banking_knowledge`
 (built with the `grep_only` retrieval variant, so no API is reached), `airline` and `retail`. Phase 2 covers banking
-only, over the tasks phase 1 found comparable across the two tags. This build implements the phase 2 smoke only; the
-later full sweep is described in the pre-registration and is not implemented here.
+only, over the tasks phase 1 found comparable across the two tags. Phase 3 covers banking and airline, on synthetic
+trajectory files built from τ²-bench's own gold actions; real published files are handled by the same commands later,
+outside the build.
 
 Environments are built only in `preflight/tau2_adapter.py`, never through τ²-bench's constructors directly. On v1.0.1
 banking logs a read to the hashed agent DB only when the read is on a per-task allowlist built by τ²-bench's runner;
@@ -24,11 +25,15 @@ the grader.
 | `preflight/compare.py` | `compare`: case-by-case pairing, report and metrics from two result folders, standard library only |
 | `preflight/mdp.py` | `Action`, `task_actions`, `horizon`, `allowed`, `features`, `trajectory`, `order_ok`, `oracle` |
 | `preflight/rl.py` | `GradeCache`, `Policy`, `train`, `split`; `N_FEATURES` and `DEFAULT_LR` |
-| `preflight/phase2.py` | `run_smoke`, `pool_ids`, `ensure_split`, and the worker CLI (`train`, `random`, `oracle`) |
+| `preflight/phase2.py` | `run_smoke`, `pool_ids`, `ensure_split`, and the worker CLI (`train`, `random`, `oracle`, `eval`) |
+| `preflight/full.py` | the phase 2 full sweep: retail tuning, ten seeds, counterfactuals, H3/H4 with bootstrap intervals |
 | `preflight/report.py` | `smoke_metrics`, `per_task_probabilities`, `write_report`, `write_metrics` |
+| `preflight/trajectories.py` | `as_simulation`, `load`, `restore_ids`, `calls`, `task_matches`, `replay`, `diff_tables`, `p1_trigger`, `p3_trigger`, `schema_floats`, `as_integers`, `numeric_pair`, `late_verification`, `regrade`, `flags` |
+| `preflight/trajectory_analysis.py` | `analyze` and `sample`: join two regrade folders, H5 and H7, `runs.csv`, `report.md`, H6's blinded packets |
+| `preflight/phase3.py` | `build_synthetic`, `worker`, `run_phase3`; the synthetic trajectory audit and its metrics |
 | `preflight/__main__.py` | CLI for the phase 1 `run` and `compare` commands |
-| `experiment.py` | the phase 1 suite under both environments and the phase 2 smoke run |
-| `demo.py` | a few airline tasks through the relation suite, or a short phase 2 training run, printed |
+| `experiment.py` | one command per phase: the phase 1 suite under both environments, the phase 2 smoke or full sweep, and the phase 3 audit (the default) |
+| `demo.py` | a few tasks through the phase 1 relations, a short phase 2 training run, or a few synthetic phase 3 runs, printed |
 
 ## Phase 1
 
@@ -134,9 +139,9 @@ has the same outcome and reward.
 
 ## Phase 2
 
-This build implements the smoke only: the first five train tasks, three seeds, `G_old` and `G_new`, 2,000 episodes per
-run, and the random baseline. The later full sweep (`G_proc`, ten seeds, held-out evaluation, H3 and H4, gold and
-empty baselines) is in the pre-registration and is not implemented in this code.
+The smoke is the first five train tasks, three seeds, `G_old` and `G_new`, 2,000 episodes per run, and the random
+baseline. The full sweep (`preflight/full.py`, `experiment.py --full`) adds `G_proc`, ten seeds, retail tuning,
+held-out and greedy evaluation, counterfactuals and H3/H4.
 
 ### The MDP (`preflight/mdp.py`)
 
@@ -181,18 +186,18 @@ ends at STOP or the horizon, grades the final trajectory and updates on `reward 
 - `split(pool_ids)`: sort, shuffle with `random.Random(20261110)`, take the first 30 as train and the next 10 as
 held-out.
 
-### Orchestration (`preflight/phase2.py`)
+### Orchestration (`preflight/phase2.py`, `preflight/full.py`)
 
 - `experiment.py` runs `python -B -m preflight.phase2 worker` in the condition's interpreter, so each process loads
 exactly one τ²-bench version and sets `LITELLM_LOCAL_MODEL_COST_MAP=True` before importing it.
-- Worker modes in this build: `train` (REINFORCE, then before writing the file it fills `calls` and the oracle parts),
-`random` (uniform over allowed actions), and `oracle` (re-grade a finished run's distinct trajectories under `G_new`
-and fill `new_reward`, `true_success`, `order_ok`, `no_altered`, `oracle_error`).
-- Conditions in the smoke are `G_old` and `G_new`. `G_proc` is defined in the pre-registration as exploratory and is
-not run in this build. A `G_old` run's oracle is filled afterwards, in the v1.0.1 interpreter.
+- Worker modes: `train` (REINFORCE, then before writing the file it fills `calls` and the oracle parts), `random`
+(uniform over allowed actions), `eval` (a trained policy without learning: per task one greedy episode then sampled
+episodes) and `oracle` (re-grade a finished run's distinct trajectories under `G_new` and fill `new_reward`,
+`true_success`, `order_ok`, `no_altered`, `oracle_error`). The oracle fill refuses a file whose action fingerprints do
+not match this version's action lists, so action indexes can never be reused across versions.
 - `pool_ids()` reads `data/banking_pool.json` and falls back to every banking task when the file is missing;
-`ensure_split` writes `split.json` once and reuses it. The smoke uses the first five train tasks, seeds 0 to 2, and
-2,000 episodes per run.
+`ensure_split` writes `split.json` once and reuses it. `full.check_split` refuses a split that differs from the
+pre-registered draw.
 - `run_smoke` runs old train, oracle-fills the old run in the v1.0.1 worker, runs new train and new random for each
 seed, then writes the report and the metrics.
 
@@ -215,6 +220,99 @@ measure, the horizon note and a scope line. Timings appear there and nowhere els
 the right steps. Reaching the gold path is therefore not a result; what each grader does to the remaining choices —
 extra reads, order, altered writes — is.
 
+## Phase 3
+
+### Records and replay (`preflight/trajectories.py`)
+
+- `as_simulation(domain, task, calls, trial=0, trimmed=False)` replays the calls with the adapter's `run`, takes the
+  last `len(calls)` tool messages and writes one message per call plus its live output: the call as
+  `{"id", "name", "arguments", "requestor"}` inside `tool_calls`, the output as
+  `{"role": "tool", "id", "content", "error", "requestor"}`. `reward_info` holds the adapter's grade and the same
+  value as `db_check.db_reward`. `trimmed=True` drops `id` and `error` from tool messages, which is what τ²-bench's
+  `trim_trajectories.py` does; the simulation id is `f"{domain}:{task.id}:{trial}"`.
+- `load(path)` returns the domain from `info.environment_info.domain_name`, the git commit, the embedded tasks keyed by
+  id, and the runs with tool-message ids restored. `restore_ids` gives a tool message without an id the id of the
+  earliest not-yet-answered tool call before it; `calls` reads every tool call in order, taking the requestor from the
+  call and else from the message role.
+- `task_matches(task_dict, task)` compares `get_pydantic_hash` of `Task.model_validate(task_dict)` with the local
+  task's; a mismatch leaves the record with `task_matches: false` and nothing else computed.
+- `replay(domain, task, run)` recomputes the run's live outputs once per process (keyed by domain, task id and the
+  canonical JSON of the calls), compares them with the recorded outputs — JSON-equal where both parse, `KB_search`
+  excluded because its retrieval differs — and regrades the recorded messages: strict first, `strict_replay=False`
+  only where v1.0.1 has that parameter, else `incompatible`. `replay_class` is `full` when the outputs match and the
+  strict regrade works, else the mode. Grades use the adapter's `env_kwargs`, so τ²-bench's read-log allowlist is
+  passed on v1.0.1 and banking is graded as τ²-bench runs it. A run that raises is recorded with its exception type
+  and first line and never stops its file.
+- `diff_tables` uses `suite._db_diff` between the env after the run's calls and the env after the gold calls; there is
+  no second copy of the DB-diff logic.
+- `p1_trigger` is a `call_discoverable_agent_tool` whose inner tool's `tool_kind` is READ, whose inner name the gold
+  run never calls, and whose live output is not an error. `p3_trigger` is a run call with the same tool (inner tool
+  for wrappers) as a gold call and an argument with the same value but a different JSON spelling, wrapper argument
+  strings unpacked first.
+- `schema_floats` resolves each call's tool through the toolkits and reports every whole-number float passed for a
+  parameter whose `openai_schema` type is `integer`; `as_integers` rewrites exactly those values, inside a wrapper's
+  JSON `arguments` string when that is where the value lives.
+- `numeric_pair` compares a run with its integer respelling: outputs equal after whole-number floats become ints
+  everywhere, end states equal under the same normalization, and both rewards. `inconsistency` is true only when
+  neither copy errored at those calls, both comparisons hold and the rewards differ.
+- `late_verification` needs the gold `log_verification`: `log_after_first_write` when the first assistant WRITE (by
+  `tool_kind`, `log_verification` itself excluded) precedes the first `log_verification`, or no verification exists at
+  all; `access_before_facts` compares the first assistant call naming the user (id, email or name from the gold
+  verification) with how many of the four facts the user's own messages already contain, matched after case folding
+  and removing spaces and punctuation. It is `None` when the run has no user message with text, which is the case for
+  every synthetic run. Both are false when the gold run has no `log_verification`.
+- `regrade(paths, out_dir)` writes one JSONL record per run and file, labelled `old` or `new` from the environment's
+  `SOURCE.txt` the same way phase 1 reads its version. The record holds the ids, `task_matches`, `replay_class`,
+  `reward`, `recorded_reward`, `mismatched`, `p1`, `p3`, `diff_tables`, `n_calls`, `nongold_call` (some call, inner
+  tool for wrappers and numbers normalized, is not in the gold run), `schema_floats` and `numeric_pair` on airline,
+  `late_verification` on banking, and `error` when something raised.
+- `flags(phase1_files, out_path)` turns phase 1's G_old per-case files into `{"P1": [...], "P3": [...]}`: a task is
+  listed when a variant of that relation is flagged, P1 only where `inserted_in_gold` is false. The `analyze` and
+  `sample` subcommands import `preflight.trajectory_analysis` lazily, so the replay module never needs numpy.
+
+### Join, H5 and H7 (`preflight/trajectory_analysis.py`)
+
+- Records of the two sides are paired by `id`, the first new-side record of an id being the counterpart. A pair enters
+  H5 when both sides are banking, both carry `task_matches`, the task is in the pool and both sides have a strict or
+  lenient grade. A pair is an event when the two rewards differ.
+- Explained: a P1 trigger on a task phase 1 flagged, with the old side's `diff_tables` exactly
+  `["agent_discoverable_tools"]`; or a P3 trigger on a flagged task with a non-empty old diff whose tables all lie in
+  the three P3 tables. Recall is `explained / events`, its interval a task-clustered percentile bootstrap (2,000
+  resamples, `numpy.random.default_rng(0)`, task ids resampled with replacement). With no events, `recall`, `ci` and
+  `held` are null and `testable` is false; `held = recall >= 0.90 and ci[0] >= 0.75`.
+- Also written: counts per replay class on both sides, the unexplained events one by one with their id, task, diff
+  tables and triggers, each trigger's precision (events among runs carrying it), and three baselines — B1 a run on a
+  flagged task, B2 any call not in gold, B3 above the median call count — each with the event rate on the positive and
+  negative side and their enrichment, null when the negative rate is 0 or missing. Every H5 summary is repeated per
+  git commit and per file stem.
+- H7 is descriptive. Airline: runs under new with schema floats, numeric-pair inconsistencies, and the control events
+  (a verdict difference between the two sides). Banking: reward-1 runs under new with a late log, and with early
+  customer access. `analyze` writes `h5.json`, `h7.json`, `runs.csv` (one row per joined pair) and a short
+  `report.md`.
+
+### H6 sampling (`trajectory_analysis.sample`)
+
+- A run is S4 when its pair is an H5 event; S1 when its new-side reward is 1 and any automated flag fires (a failed
+  WRITE, `late_verification` true, or a WRITE not in gold after dropping arguments equal to the tool's schema default
+  and normalizing numbers); S2 when its reward is 1 with none; S3 when its reward is 0. S4 is taken out of S1-S3, so a
+  run is drawn once. Ids are sorted and drawn with `random.Random(0)`, all of them when a stratum is short, and any
+  shortfall is written to `shortfalls.json`.
+- The draw is shuffled with the same rng and written as `packets/NN.json`: the task instructions, the policy text the
+  file carries when it has one (else the domain's policy file), and the messages. `key.json` holds the packet number,
+  the run id and the stratum, and nothing in a packet names a reward, a stratum, a flag or an id.
+
+### The synthetic experiment (`preflight/phase3.py`)
+
+- `experiment.py --phase 3` (the default) dispatches `python -m preflight.phase3 worker` into each environment, as phase
+  1 does, so one process loads one τ²-bench version and every recorded output comes from the env that grades it.
+- Banking: for every pool task, the gold run, a `trimmed=True` copy, the first P1 variant whose detail starts with
+  `extra agent read`, the P3 variant when the task has one, and the F6 late-verification variant when it has one, as
+  trials 0-4. Airline: every task's gold run and a copy whose integers for integer-schema parameters are floats.
+- The parent writes the synthetic files in each env, regrades them there, writes the flags from the old side's
+  records (`p1` or `p3` true with a reward of 0), joins the two sides with `trajectory_analysis.analyze` and writes the
+  metrics. The run is deterministic: the flags and the metrics are recomputed from per-run records, so two runs give
+  the same numbers.
+
 ## Known limits
 
 - Only the DB-state term decides a verdict; a task whose reward also depends on communication or assertions is
@@ -230,5 +328,11 @@ extra reads, order, altered writes — is.
   fault in this harness, not as a finding.
 - Phase 2's policy is open-loop, its action set is built once per task, its grader cache is per run and never saved,
   and its oracle is ours. A G_old run needs the v1.0.1 interpreter to learn its true success, so the pipeline
-  dispatches that step as a separate process. This build is the smoke only; held-out evaluation, G_proc, H3 and H4
-  are not computed here.
+  dispatches that step as a separate process. The smoke is not the full sweep: held-out evaluation, G_proc, H3 and H4
+  are not computed by `--phase 2`.
+- Phase 3 in this build has no real trajectory file: every number comes from synthetic runs built from gold actions,
+  so it shows that the pipeline works, not what published agents did. `access_before_facts` is `None` on synthetic
+  runs because they carry no user message with text. A run's end state is compared as two DB hashes and a list of
+  top-level table names. H6 has no labelers here: the packets and the key are produced, the labels are not, and no
+  population rate can be read off a stratified sample in any case. A file whose incompatible share is high is
+  reported, not tuned around.
