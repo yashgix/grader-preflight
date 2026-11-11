@@ -1,2 +1,7 @@
 __pycache__/
 *.pyc
+.ruff_cache/
+.tau2/
+.venv/
+runs/
+*.egg-info/

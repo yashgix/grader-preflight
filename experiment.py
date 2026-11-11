@@ -7,13 +7,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+from preflight.envs import DEFAULT_NEW, DEFAULT_OLD
+
 sys.dont_write_bytecode = True
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
 
 DOMAINS = ("banking_knowledge", "airline", "retail")
 REPO_ROOT = Path(__file__).resolve().parent
-DEFAULT_OLD = "/Users/Shared/arcturus-exec/envs/tau2-pre-py312/bin/python"
-DEFAULT_NEW = "/Users/Shared/arcturus-exec/envs/tau2-v101-py312/bin/python"
 
 
 def _environment() -> dict:

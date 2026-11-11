@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from preflight import report
+from preflight.envs import DEFAULT_NEW, DEFAULT_OLD
 from preflight.mdp import actions_fingerprint, allowed, features, horizon, oracle, order_ok, task_actions, trajectory
 from preflight.relations import _inner_name, calls_as_dicts
 from preflight.rl import DEFAULT_LR, N_FEATURES, GradeCache, Policy, _episode, _gold_names, split, train
@@ -21,8 +22,7 @@ from preflight.tau2_adapter import Call, tasks
 DOMAIN = "banking_knowledge"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 POOL_PATH = REPO_ROOT / "data" / "banking_pool.json"
-DEFAULT_OLD = "/Users/Shared/arcturus-exec/envs/tau2-pre-py312/bin/python"
-DEFAULT_NEW = "/Users/Shared/arcturus-exec/envs/tau2-v101-py312/bin/python"
+
 SMOKE_SEEDS = (0, 1, 2)
 SMOKE_EPISODES = 2000
 SPLIT_SEED = 20261110

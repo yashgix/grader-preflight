@@ -17,6 +17,7 @@ from pathlib import Path
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 from preflight import trajectories, trajectory_analysis
+from preflight.envs import DEFAULT_NEW, DEFAULT_OLD
 from preflight.relations import build_variants, f6_late_verification, p3_respelled_numbers
 from preflight.tau2_adapter import Call, gold_calls, tasks
 
@@ -25,8 +26,6 @@ AIRLINE = "airline"
 DOMAINS = (BANK, AIRLINE)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 POOL_PATH = REPO_ROOT / "data" / "banking_pool.json"
-DEFAULT_OLD = "/Users/Shared/arcturus-exec/envs/tau2-pre-py312/bin/python"
-DEFAULT_NEW = "/Users/Shared/arcturus-exec/envs/tau2-v101-py312/bin/python"
 
 
 def _environment() -> dict:
