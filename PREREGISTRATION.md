@@ -310,3 +310,22 @@ preflight does not explain.
 - **Rules.** No relation, trigger, threshold or sampling change after held-out data is seen; any deviation is
   amendment 8, before results. A file with more than 20% incompatible runs is reported, not tuned around. H5 and H7
   are recomputed independently from per-run records without the module's code. No paid agent runs.
+
+### 8. H6 labelling order and the second labeler (11 Nov 2026, after the phase 3 results, before any H6 label)
+
+Written after H5 and H7 were computed and the 24-run H6 sample was drawn and blinded; no run has been labelled.
+H5, H7, the sample and the codebook are unchanged.
+
+- **H5 stays as pre-registered: not held** (87 of 118 events explained, recall 0.737, interval [0.478, 0.938]). The
+  31 misses (P1-trigger #329 runs on 6 tasks phase 1's per-task draw never flagged) and the proposal to enumerate
+  every read candidate per task are separate, post-hoc findings, never a retroactive H5 result.
+- **The G_old replay incompatibility** (22-30% of comparable runs in every banking file, over the 20% line) is
+  reported with every phase 3 conclusion.
+- **Yash's first five runs** were drawn before any model label, because labeler B could not run yet:
+  `random.Random(0).sample` of the 16 S1+S2 packet numbers in sorted order, giving packets 15, 24, 8, 1, 5. They are
+  an initial human audit and do not replace adjudication of model disagreements. If labelers A and B disagree on
+  other runs, those go to Yash next (up to 10 in all), as amendment 7 says.
+- **Labeler B is DeepSeek v4-pro** (thinking mode), through the existing build grant with at most $3 for labelling.
+  Labeler A is a fresh Claude subagent. Both get the same readable pages Yash gets (long search-tool outputs
+  shortened, everything else whole), the labelling guide and nothing else: no reward, stratum, flag, id or
+  hypothesis. Both are model-assisted annotations, reported as such.
