@@ -19,6 +19,9 @@ build() {
   (cd "$dir/src" && UV_PROJECT_ENVIRONMENT="$dir/venv" uv sync --quiet --frozen --no-install-project --no-build --python 3.12)
   uv pip install --quiet --python "$dir/venv/bin/python" --require-hashes --no-deps --only-binary :all: \
     -r "$ROOT/env/requirements-extra.txt"
+  # Provenance line the suite records in every result file (first line: "tau2 <tag> (commit <sha>) from <repo>").
+  printf 'tau2 %s (commit %s) from %s\nuv.lock sha256 %s\nbuilt %s with scripts/setup-tau2.sh\n' \
+    "$name" "$commit" "$REPO" "$LOCK_SHA" "$(date -u '+%Y-%m-%d %H:%M:%S')" > "$dir/venv/SOURCE.txt"
   site=$("$dir/venv/bin/python" -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
   echo "$dir/src/src" > "$site/tau2-src.pth"
   "$dir/venv/bin/python" -c "import tau2" && echo "$name: ready ($dir/venv/bin/python)"
