@@ -1,8 +1,10 @@
-"""Offline demo: a small airline run through the relation suite, printed step by step."""
+"""Offline demo: phase 1 relations on a few tasks, a short phase 2 training run, or a synthetic phase 3 audit."""
 
 import argparse
 import json
 import os
+import tempfile
+from pathlib import Path
 
 # tau2's LLM paths must never reach the network; set before the suite imports tau2.
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
@@ -10,9 +12,12 @@ os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="demo.py", description=__doc__)
-    parser.add_argument("--domain", default="airline")
+    parser.add_argument("--phase", type=int, choices=(1, 2, 3), default=1)
+    parser.add_argument("--domain", default="airline", help="phase 1 domain")
     parser.add_argument("--limit", type=int, default=5, help="tasks to run")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--condition", choices=("old", "new", "proc"), default="new", help="phase 2 condition")
+    parser.add_argument("--episodes", type=int, default=200, help="phase 2 training episodes")
     return parser
 
 
@@ -81,8 +86,7 @@ def _print_example(result: dict) -> None:
         print(f"db fields that differ from the gold run: {', '.join(variant['db_diff'])}")
 
 
-def main(argv=None) -> int:
-    args = _parser().parse_args(argv)
+def _phase1(args) -> int:
     from preflight.suite import run_suite
 
     result = run_suite(args.domain, seed=args.seed, limit=args.limit)
@@ -91,6 +95,60 @@ def main(argv=None) -> int:
     _print_example(result)
     print(f"records sha256 {result['records_sha256']}")
     return 0
+
+
+def _phase2(args) -> int:
+    """A short smoke training run on the first pool tasks; the metrics printed are the smoke report's own."""
+    from preflight.phase2 import DOMAIN, pool_ids, train_run
+    from preflight.report import smoke_metrics
+
+    task_ids = pool_ids()[: args.limit]
+    if not task_ids:
+        print("no banking tasks in the pool")
+        return 1
+    with tempfile.TemporaryDirectory() as temporary:
+        path = Path(temporary) / "run.json"
+        payload = train_run(args.condition, args.seed, task_ids, args.episodes, path, domain=DOMAIN)
+    metrics = smoke_metrics([payload], episodes=args.episodes)
+    print(f"phase 2 demo: condition {args.condition}, {len(task_ids)} tasks, {len(payload['episodes'])} episodes")
+    for key in sorted(metrics):
+        print(f"  {key}: {metrics[key]}")
+    return 0
+
+
+def _phase3(args) -> int:
+    """Gold banking runs as a tau2 results file, regraded here; synthetic, so no real trajectory is read."""
+    from preflight import phase3, trajectories
+
+    with tempfile.TemporaryDirectory() as temporary:
+        folder = Path(temporary)
+        files = folder / "files"
+        files.mkdir()
+        path = files / f"{phase3.BANK}.json"
+        task_dicts, simulations = [], []
+        for task in phase3.tasks(phase3.BANK)[: args.limit]:
+            task_dicts.append(phase3._task_dict(task))
+            simulations.append(trajectories.as_simulation(phase3.BANK, task, phase3.gold_calls(task), trial=0))
+        phase3._write_results(path, phase3.BANK, task_dicts, simulations)
+        (written,) = trajectories.regrade([path], folder / "regrade")
+        records = [json.loads(line) for line in written.read_text(encoding="utf-8").splitlines() if line.strip()]
+    print(f"phase 3 demo: {len(records)} synthetic banking runs, tau2 {trajectories.version_label()}")
+    for record in records:
+        print(
+            f"  {record['task_id']}: replay {record['replay_class']}, reward {record['reward']}, "
+            f"calls {record['n_calls']}, task matches {record['task_matches']}"
+        )
+    full = sum(1 for record in records if record["replay_class"] == "full")
+    accepted = sum(1 for record in records if record["reward"] == 1.0)
+    print(f"full replays {full} of {len(records)}, verdicts of 1 {accepted}")
+    return 0
+
+
+def main(argv=None) -> int:
+    args = _parser().parse_args(argv)
+    if args.phase == 3:
+        return _phase3(args)
+    return _phase2(args) if args.phase == 2 else _phase1(args)
 
 
 if __name__ == "__main__":

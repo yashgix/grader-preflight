@@ -2,15 +2,18 @@
 
 ## Scope
 
-Every verdict in this project is the DB-state verdict of `EnvironmentEvaluator.calculate_reward`, called unchanged
-with the environment arguments τ²-bench's runner uses for the task. Tasks are those with `DB` in `reward_basis`; the
+Every verdict in this project is the DB-state verdict of `EnvironmentEvaluator.calculate_reward`, called unchanged with
+the environment arguments τ²-bench's runner uses for the task. Tasks are those with `DB` in `reward_basis`; the
 COMMUNICATE, NL_ASSERTION and ACTION terms are never the subject of a variant. Phase 1 covers `banking_knowledge`
-(built with the `grep_only` retrieval variant, so no API is reached), `airline` and `retail`.
+(built with the `grep_only` retrieval variant, so no API is reached), `airline` and `retail`. Phase 2 covers banking
+only, over the tasks phase 1 found comparable across the two tags. Phase 3 covers banking and airline, on synthetic
+trajectory files built from τ²-bench's own gold actions; real published files are handled by the same commands later,
+outside the build.
 
-Environments are built only in `preflight/tau2_adapter.py`, never through tau2's constructors directly. On v1.0.1
-banking logs a read to the hashed agent DB only when the read is on a per-task allowlist built by tau2's runner; the
-adapter derives it with tau2's own `_derive_read_log_allowlist` and passes it to the live environment and to the
-grader.
+Environments are built only in `preflight/tau2_adapter.py`, never through τ²-bench's constructors directly. On v1.0.1
+banking logs a read to the hashed agent DB only when the read is on a per-task allowlist built by τ²-bench's runner;
+the adapter derives it with τ²-bench's own `_derive_read_log_allowlist` and passes it to the live environment and to
+the grader.
 
 ## Module map
 
@@ -20,17 +23,27 @@ grader.
 | `preflight/relations.py` | `tool_kind`, `Variant`, the six generators in `RELATIONS`, `build_variants`, `static_checks` |
 | `preflight/suite.py` | `run_suite`: base runs, variants, per-case records, fingerprints, provenance, `records_sha256` |
 | `preflight/compare.py` | `compare`: case-by-case pairing, report and metrics from two result folders, standard library only |
-| `preflight/__main__.py` | CLI for `run` and `compare` |
-| `experiment.py` | the suite under both environments, then the comparison |
-| `demo.py` | a few airline tasks, printed |
+| `preflight/mdp.py` | `Action`, `task_actions`, `horizon`, `allowed`, `features`, `trajectory`, `order_ok`, `oracle` |
+| `preflight/rl.py` | `GradeCache`, `Policy`, `train`, `split`; `N_FEATURES` and `DEFAULT_LR` |
+| `preflight/phase2.py` | `run_smoke`, `pool_ids`, `ensure_split`, and the worker CLI (`train`, `random`, `oracle`, `eval`) |
+| `preflight/full.py` | the phase 2 full sweep: retail tuning, ten seeds, counterfactuals, H3/H4 with bootstrap intervals |
+| `preflight/report.py` | `smoke_metrics`, `per_task_probabilities`, `write_report`, `write_metrics` |
+| `preflight/trajectories.py` | `as_simulation`, `load`, `restore_ids`, `calls`, `task_matches`, `replay`, `diff_tables`, `p1_trigger`, `p3_trigger`, `schema_floats`, `as_integers`, `numeric_pair`, `late_verification`, `regrade`, `flags` |
+| `preflight/trajectory_analysis.py` | `analyze` and `sample`: join two regrade folders, H5 and H7, `runs.csv`, `report.md`, H6's blinded packets |
+| `preflight/phase3.py` | `build_synthetic`, `worker`, `run_phase3`; the synthetic trajectory audit and its metrics |
+| `preflight/__main__.py` | CLI for the phase 1 `run` and `compare` commands |
+| `experiment.py` | one command per phase: the phase 1 suite under both environments, the phase 2 smoke or full sweep, and the phase 3 audit (the default) |
+| `demo.py` | a few tasks through the phase 1 relations, a short phase 2 training run, or a few synthetic phase 3 runs, printed |
 
-## Base run
+## Phase 1
+
+### Base run
 
 Each task's gold run is replayed once on a fresh environment and graded. Only a task whose base verdict is 1 gets
 variants; a base run that raises is recorded as `base_outcome: "error"` with `static.base_error`, keeps the record's
 shape, and gets no variants.
 
-## Resolving a call to a tool
+### Resolving a call to a tool
 
 `tool_kind(env, call)` answers what a call reaches, not what it is named. `call_discoverable_agent_tool` reaches the
 tool named by `agent_tool_name` in `env.tools`, `call_discoverable_user_tool` the tool named by
@@ -38,203 +51,288 @@ tool named by `agent_tool_name` in `env.tools`, `call_discoverable_user_tool` th
 `env.user_tools` for a user call. Existence is settled by `has_tool(name)` when the toolkit has one, and the declared
 kind by the toolkit's `tool_type(name)` when that is callable, else by the `Tool` object's own `tool_type`. The kind is
 read as a lowercase string (an enum's `value` when it is one); anything outside `read`, `write`, `generic` and `think`
-counts as `generic`, and a name in neither toolkit is `unknown`. Toolkit contents are read through `get_tools()` and
-`get_discoverable_tools()`, with a dict or a sequence of tools with `.name` accepted as a fallback.
+counts as `generic`, and a name in neither toolkit is `unknown`.
 
 A live tool message counts as an error when it has `error=True` or when its content is a string starting with
 `Error:` — the second form is how the discoverable wrappers report a failure.
 
-## Relations and their validity filters
+### Relations and their validity filters
 
 The generators in `preflight/relations.py` build candidates; `build_variants` is the only entry point the suite uses,
 and it drops any variant whose calls equal the gold calls (amendment 3), reporting each skip.
 
 **P1, an extra read.** `_p1_plans` collects the assistant toolkit's direct reads plus its discoverable reads, skipping
-the wrapper names and the unlock names. A tool is a read when the toolkit's declared `tool_type(name)` says so: the
-`Tool` object a toolkit hands out need not carry the kind, and `tool_type` answers for discoverable names too. A
-discoverable read is a candidate whether or not the gold run has unlocked it, because after the #329 fix a read is
-logged only when it is on the allowlist tau2's runner derives from the gold run; a read the gold run already uses
-therefore carries no information about the fix, and one it never unlocks is the interesting case. Required argument
-names come from the tool's JSON schema, preferring the authoritative `openai_schema["function"]["parameters"]` when it
-carries a `properties` mapping, then `parameters` or `params` when one of those is a full schema. A bare parameter
-mapping is not a schema: the callable's decorated signature then says which arguments are required (those with no
-default) and which are optional, and only when neither is available is every mapped name treated as required. That
-signature path is what serves discoverable reads, plain bound methods with no schema and no `.func`.
-
-Each required name must be supplied by an earlier gold call, wrapper `arguments` strings included; the insertion
-point is after the last call that supplied one. A discoverable read is called through `call_discoverable_agent_tool`
-with a JSON `arguments` string; when the run has not unlocked that tool before the insertion point,
-`unlock_discoverable_agent_tool` is inserted right before the read (`_insert_with_unlock`), so the variant is the gold
-run plus one block. The variant is kept only if replaying the prefix through the inserted read ends in a tool message
-that is not an error. Candidates are sorted by route, name and position and then shuffled with `rng`, with no priority
-by kind or route, so the draw is reproducible and a read that fails its replay never takes one of the five slots; the
-first five that run cleanly are the variants. `inserted_in_gold` is true when the inserted tool (the inner tool, for a
-wrapper) also appears in the gold run — the gold calls contribute their inner name for wrapper calls — and H1(a)
-counts those variants apart on both sides.
+the wrapper and unlock names, keeping only tools whose declared `tool_type(name)` says `read`. Required argument names
+come from the tool's JSON schema, preferring `openai_schema["function"]["parameters"]`; a bare parameter mapping is
+not a schema, and the callable's signature then says which arguments are required. Each required name must be
+supplied by an earlier gold call, wrapper `arguments` strings included, and the read goes right after the last call
+that supplied one. A discoverable read is called through `call_discoverable_agent_tool` with a JSON `arguments`
+string; when the run has not unlocked it before, `unlock_discoverable_agent_tool` goes right before the read. The
+variant is kept only if replaying the prefix through the inserted read ends in a tool message that is not an error.
+Candidates are sorted by route, name and position and then shuffled with `rng`, with no priority by kind or route, so
+the draw is reproducible and a read that fails its replay never takes one of the five slots. `inserted_in_gold` is
+true when the inserted (inner) tool also appears in the gold run; H1(a) counts those variants apart on both sides.
 
 **P3, respelled numbers.** Every numeric argument is respelled with the same value, integral `int` to `float` and
 integral `float` to `int`; the JSON `arguments` string of a discoverable wrapper is rewritten token by token over its
-number literals, so the parsed value is unchanged and the string form differs. Only the three wrappers
-(`call_discoverable_agent_tool`, `call_discoverable_user_tool`, `give_discoverable_user_tool`) get that treatment: a
-string argument named `arguments` on any other tool is an ordinary string and is left as it is. Booleans are left
-alone. Nothing to respell means no variant, recorded as `identical_to_gold`. This is the #397 check: a grader that hashes
-number echoes rather than values rejects the same state written differently.
+number literals. Only the three wrappers (`call_discoverable_agent_tool`, `call_discoverable_user_tool`,
+`give_discoverable_user_tool`) get that treatment; a string argument named `arguments` on any other tool is left
+alone, and booleans are not numbers. Nothing to respell means no variant, recorded as `identical_to_gold`.
 
 **P5, an unknown tool.** The position is drawn with `rng` from `0..len(gold)`. The variant is kept only when the agent
-and user DB hash pair right after the inserted call equals the pair right before it; otherwise the generator returns
-nothing and the task's `static` carries `p5_not_inert`. If that validation replay raises, the exception travels out of
-the generator and `build_variants` and the suite records it in the task's `static.relation_errors` under `P5`, with no
-variant built: a check that did not complete is never reported as passed.
+and user DB hash pair right after the inserted call equals the pair right before it; otherwise the task's `static`
+carries `p5_not_inert`. If that validation replay raises, the exception travels out of the generator and the suite
+records it in `static.relation_errors` under `P5`, with no variant built: a check that did not complete is never
+reported as passed.
 
-**F1, an empty run.** Dropped when the gold run is also empty, since then it is the gold run itself; the task records
-`identical_to_gold`.
+**F1, an empty run.** Dropped when the gold run is also empty, since then it is the gold run itself.
 
-**F3, a dropped write.** Only calls of kind `write`. The gold end state is replayed once; each write is dropped in
-turn and the variant kept only when the resulting agent and user hash pair differs from the gold run's. A write whose
-removal changes nothing has nothing for the grader to catch: it gets no variant and is counted in `static_checks` as
-`no_effect_writes`. This is amendment 1.
+**F3, a dropped write.** Only calls of kind `write`. The gold end state is replayed once; each write is dropped in turn
+and the variant kept only when the resulting agent and user hash pair differs from the gold run's. A write whose
+removal changes nothing is counted in `static_checks` as `no_effect_writes`.
 
 **F6, late verification.** Banking only, one variant per `log_verification` that is followed by at least one write,
 with that call moved to the end of the run.
 
-The suite keeps the relation ids sorted in the task's `identical_to_gold` list. A P5 relation that yields nothing is
-reported as `p5_not_inert`, because the generator builds one candidate and drops it only when the unknown call moved
-the live DB. A P3 relation that yields nothing is reported only when the respelled calls equal the gold calls.
-
 A variant record's `checks` names the validity check that was applied to it (`inserted_ran_cleanly` for P1, `inert` for
-P5, `end_state_changed` for F3, empty otherwise). Candidates that failed their check never reach a record: they are
-dropped inside the generator or `build_variants`, and the reason survives as `p5_not_inert` or `no_effect_writes` in the
-task's static entry, or as a `relation_errors` entry when the check itself raised.
+P5, `end_state_changed` for F3, empty otherwise). Candidates that failed their check never reach a record.
 
-## Static checks
+### Static checks
 
-`static_checks(domain, task)` replays the gold run and every write-removed run, and returns `gold_errors` (S1: tool
-outputs with `error=True` or a wrapper `Error:` line), `gold_changes_db` (S2: the gold run's agent or user hash
-differs from a fresh environment's) and `no_effect_writes` (F3's filter). A static check that raises keeps the task
-record's shape: the three values are null and the exception sits beside them in `static_error`.
+`static_checks(domain, task)` replays the gold run and every write-removed run, and returns `gold_errors` (S1), `gold_changes_db` (S2) and `no_effect_writes` (F3's filter). A static check that raises keeps the task record's shape:
+the three values are null and the exception sits beside them in `static_error`.
 
-## Errors are outcomes, not verdicts
+### Errors are outcomes, not verdicts
 
 A replay or grading exception on a variant, or on a base run, produces `outcome = "error"` with
 `error = {"type": <class name>, "message": <first line, at most 200 chars>}`, `reward = null` and `flagged = null`. A
-variant that raised while replaying carries no `end_state`; one that raised only in the grader keeps the hash pair it
-reached.
+tool call the live environment answers with an error output is a fact about that call, recorded in `live_call_errors`
+and in S1, not an error outcome. At task level, a base run that raises gets a `static.base_error` and no variants, and
+a generator that raises is recorded in `static.relation_errors` under its relation id; neither aborts the run.
 
-Errors are never counted as rewards or flags: the comparison reports attempted = verdicts + errors for every domain
-and relation. A tool call the live environment answers with an error output is a fact about that call, recorded in
-`live_call_errors` and in S1, not an error outcome. Both rules are amendment 2.
-
-At task level, a base run that raises gets a `static.base_error` and no variants, and a generator that raises is
-recorded in `static.relation_errors` under its relation id; neither aborts the task or the domain run.
-
-## Records and fingerprints
+### Records and fingerprints
 
 - `task_fingerprint`: SHA-256 of the canonical JSON of `task.model_dump(mode="json")`.
 - `gold_fingerprint`: SHA-256 of the canonical JSON of the gold calls.
-- `gold_output_fingerprint`: SHA-256 of the gold run's tool outputs, each parsed as JSON where it parses, with every
-  number that is not a boolean turned into a float, in canonical JSON. `25` and `25.0` therefore match, which matters
-  because #397 changes number echoes on purpose.
-- `output_fingerprint` (per variant): the variant's live tool outputs, run through the same function, so a variant and
-  the gold run can be compared on the state they produced as well as on the verdict. It is null when the variant raised
-  before producing outputs.
+- `gold_output_fingerprint` and a variant's `output_fingerprint`: SHA-256 over the tool outputs, each parsed as JSON
+  where it parses, with every number that is not a boolean turned into a float, in canonical JSON. `25` and `25.0`
+  therefore match, which matters because #397 changes number echoes on purpose.
 
 Canonical JSON is `json.dumps(x, sort_keys=True, separators=(",", ":"), ensure_ascii=True)`. `end_state` is
 `{"variant": [agent hash, user hash], "gold": [agent hash, user hash]}`; `db_diff` names the top-level agent and user
-DB fields whose values differ from the gold run's, read through `env.tools.db` and `env.user_tools.db`.
+DB fields whose values differ from the gold run's.
 
-## Determinism, record hashing and digests
+### Determinism and the comparison
 
 Each task and relation gets `random.Random(f"{seed}:{task.id}:{relation}")`, so a seed fixes every sample and one
 task's draw cannot shift another's. Variant records are serialised without `seconds`, sorted by
-(`task_id`, `relation`, `detail`) and joined by newlines; `records_sha256` is the SHA-256 of that text. The comparison
-reduces each side's per-file hashes to `records_digest`: the integer value of the first 12 hex digits of the SHA-256 of
-the files' `records_sha256` values, sorted by domain (and file name) and joined by newlines. `records_sha256` covers
-the variant records only, so matching digests show that both runs produced the same variants and the same verdicts;
-they say nothing about a task's base outcome, its static checks or its fingerprints, which the pre-registration's
-per-case repeatability is checked against outside the project, from the per-case files a run leaves behind.
+(`task_id`, `relation`, `detail`) and joined by newlines; `records_sha256` is the SHA-256 of that text, and the side
+digest is the integer value of the first 12 hex digits of the SHA-256 of the files' hashes.
 
-## Comparison
+`compare(old_dir, new_dir, out_path)` reads only the JSON files and pairs cases before it counts anything: an OLD and a
+NEW variant are a pair when domain, `task_id`, `relation`, `detail` and the canonical JSON of `calls` are equal. Only
+pairs on comparable tasks count toward the hypotheses; a task is comparable when it is on both sides and its
+`task_fingerprint` and `gold_output_fingerprint` agree. A variant on a comparable task with no counterpart is
+unpaired. Errors never count as verdicts: every count reports attempted = verdicts + errors. The control passes when,
+on airline and retail, every task is on both sides with an identical fixture, every variant is paired and each pair
+has the same outcome and reward.
 
-`compare(old_dir, new_dir, out_path)` reads only the JSON files, writes the Markdown report to `out_path`, writes
-`metrics.json` beside it, and returns the metrics object. Nothing is compared on totals alone.
+## Phase 2
 
-### Pairing
+The smoke is the first five train tasks, three seeds, `G_old` and `G_new`, 2,000 episodes per run, and the random
+baseline. The full sweep (`preflight/full.py`, `experiment.py --full`) adds `G_proc`, ten seeds, retail tuning,
+held-out and greedy evaluation, counterfactuals and H3/H4.
 
-An OLD and a NEW variant are a pair when domain, `task_id`, `relation`, `detail` and the canonical JSON of `calls` are
-all equal; duplicates under one key are paired in sorted order, the leftovers are unpaired. A task is comparable when
-it is present on both sides and its `task_fingerprint` and `gold_output_fingerprint` are equal; otherwise it is
-listed as fixture changed, with the fingerprint that differs, and left out of the hypotheses and of the control. A
-task present on one side only is listed; in banking it counts as not comparable, in airline and retail it fails the
-control.
+### The MDP (`preflight/mdp.py`)
 
-A variant on a comparable task with no counterpart is unpaired: it is listed, counted in `unpaired_comparable`, fails
-the control in airline and retail, and in banking it makes the H1 part of its relation not held (for P1, only when
-the variant is not `inserted_in_gold`).
+- `Action(kind, calls, gold_index)` is frozen; `kind` is `"gold"`, `"read"`, `"altered"` or `"stop"`; `calls` is a
+tuple of `Call` (two for a discoverable read that brings its unlock, empty for STOP); `gold_index` is the gold position
+of a gold call or of the gold write an altered copy comes from.
+- `task_actions(domain, task)` is deterministic: gold calls first in gold order, then the P1 read candidates, then the
+altered writes, then STOP last. Reads are deduplicated by their calls and, when a discoverable read has not been
+unlocked before its insertion point, come as an unlock plus the wrapper call.
+- Altered writes: for each gold write, at most two copies, each swapping one string argument whose name ends in `_id`
+for another value that argument name takes in this task's gold run or, if none, in another banking task's gold run
+(sorted, first value). Numbers and every other argument are copied from the gold call, so #397 cannot differ between
+conditions. For a discoverable wrapper the `_id` value lives inside the wrapper's JSON `arguments` string and only
+that one value is rewritten there.
+- `horizon(task)` is gold length + 3. `allowed(actions, made)` keeps every action at most once per episode but always
+keeps STOP; a wrapper read of a tool the gold run unlocks waits for that exact gold unlock, while a read whose action
+already contains its own unlock is available immediately.
+- `features(actions, i, made, step, horizon)` returns the eight shared features in the fixed order `is_read`,
+`is_write`, `is_gold`, `is_gold_next` (the earliest gold action not made), `is_altered`, `is_gating` (the action
+contains a `log_verification`), `is_stop`, `step / horizon`. `trajectory` flattens the made actions in order.
+- `order_ok(task, calls)`: for every gold `log_verification`, each of its own gated writes (the gold writes after that
+verification) that appears in the trajectory must come after that verification. Extra reads never count. Calls are
+matched with exact `Call` equality, inner wrapper tools included.
+- `oracle` returns `true_success = (new_reward == 1.0 and order_ok and no altered write was made)`, with `order_ok`
+and `no_altered` beside it; a `None` verdict (a grader error) gives false.
 
-### Report
+### The learner (`preflight/rl.py`)
 
-The report holds, in order:
+- `GradeCache(domain, grade=tau2_adapter.grade)` keys a real grader call by (task id, task fingerprint, canonical JSON
+of the ordered calls). A miss calls `grade` once and counts in `misses`; instances are callable as
+`cache(task, calls)`. A grader exception is cached as `None` and asked for no second time. The cache lives in one run's
+process, i.e. one τ²-bench version and one condition.
+- `Policy(n_features, lr=0.1)` holds `w` (zeros) and `bias` (a dict keyed by `(task id, action index)`). `probs` is a
+softmax over `rows @ w` plus the bias of each candidate; `update(steps, advantage)` takes one gradient-ascent step on
+`advantage * log prob` of each chosen action, i.e. `chosen row - sum(p_i * row_i)` for `w` and `indicator - p_i` for
+each bias.
+- `train(domain, tasks, seed, episodes, reward_fn, policy=None)`: actions, horizon and gold tool names are prepared
+once per task; each episode draws a task uniformly with `random.Random(seed)`, samples each action from the policy,
+ends at STOP or the horizon, grades the final trajectory and updates on `reward - running mean of past rewards`. A
+`None` reward counts as 0 for learning and is recorded with `error = True`. Records hold `task_id`, `made`, `reward`,
+`error` and `extra_reads` (READ actions whose inner tool names are not in the gold run). Same arguments, same records.
+- `split(pool_ids)`: sort, shuffle with `random.Random(20261110)`, take the first 30 as train and the next 10 as
+held-out.
 
-1. the old and new directories, then the fixture-changed tasks with the fingerprint that differs, then one-sided tasks
-   and unpaired comparable variants;
-2. a table per domain and relation on each side: attempted, verdicts, errors, flagged variants and flagged tasks;
-3. the same table for P1 split by `inserted_in_gold` (`in gold`, `not in gold`);
-4. the flags present on OLD and absent on NEW, one line per pair: a pair flagged on OLD whose NEW counterpart is a
-   verdict and not flagged, with domain, `task_id`, `relation` and `detail`; flag sets are never subtracted task by
-   task, so two variants of one task whose flags move in opposite directions are told apart by their `detail`;
-5. one line each for H1(a), H1(b) and H2, starting `held` or `not held`, with the numbers behind them, the `db_diff`
-   field sets of the H1 part's OLD flags with their counts, and how many of its pairs differ in `output_fingerprint`;
-6. the control line and its mismatches;
-7. F1 counts per side, domain and `gold_changes_db` (`unknown` when the task has no boolean static entry), with
-   attempted, verdicts, errors, passed variants and passed tasks;
-8. the relations skipped as identical to gold, counted per side, domain and relation;
-9. `p5_not_inert` tasks and `no_effect_writes` per side and domain;
-10. the `records_sha256` of every input file.
+### Orchestration (`preflight/phase2.py`, `preflight/full.py`)
 
-### Checks
+- `experiment.py` runs `python -B -m preflight.phase2 worker` in the condition's interpreter, so each process loads
+exactly one τ²-bench version and sets `LITELLM_LOCAL_MODEL_COST_MAP=True` before importing it.
+- Worker modes: `train` (REINFORCE, then before writing the file it fills `calls` and the oracle parts), `random`
+(uniform over allowed actions), `eval` (a trained policy without learning: per task one greedy episode then sampled
+episodes) and `oracle` (re-grade a finished run's distinct trajectories under `G_new` and fill `new_reward`,
+`true_success`, `order_ok`, `no_altered`, `oracle_error`). The oracle fill refuses a file whose action fingerprints do
+not match this version's action lists, so action indexes can never be reused across versions.
+- `pool_ids()` reads `data/banking_pool.json` and falls back to every banking task when the file is missing;
+`ensure_split` writes `split.json` once and reuses it. `full.check_split` refuses a split that differs from the
+pre-registered draw.
+- `run_smoke` runs old train, oracle-fills the old run in the v1.0.1 worker, runs new train and new random for each
+seed, then writes the report and the metrics.
 
-Only verdicts count toward held or not held; errors are printed beside them.
+### Report and metrics (`preflight/report.py`)
 
-- H1(a): on comparable banking tasks, counting P1 pairs whose variants are not `inserted_in_gold` on either side, at
-  least one pair is flagged on OLD, no pair is flagged on NEW, NEW produced at least one verdict in that group, and
-  no unpaired comparable variant belongs to it.
-- H1(b): the same for P3.
-- H2: F3 pass rate at most 1%, at least 20 airline tasks where an empty run passes, F6 passing on at least half of the
-  banking tasks that have an F6 verdict, and at least one flagged P-relation variant on NEW. A part with no verdict
-  behind it is not held.
-- Control: on airline and retail, every task is on both sides with an identical fixture, every variant is paired, and
-  each pair has the same outcome and the same reward. Any mismatch fails the control and invalidates the run until it
-  is explained.
+- `smoke_metrics` is computed from the per-run episode records only: grader calls old and new, errors across runs and
+the random baseline, gate true success over episodes 1,701 to 2,000 under `G_new`, random true success, old true
+success over the last 300 episodes, extra-read rates over the last 300 episodes for old, new and random, and distinct
+trajectories over old and new.
+- `per_task_probabilities` returns, per task and condition, the final policy's probabilities of gold actions, extra
+reads and STOP beside the uniform-start probabilities.
+- `write_report` lays out the per-run table with timings and episodes per second, grader calls per episode, the random
+baseline row, the kept-apart measures, the curves at fixed checkpoints, per-task final policy probabilities, the gate
+measure, the horizon note and a scope line. Timings appear there and nowhere else.
+- `write_metrics` writes numbers only: booleans become 0/1, so two runs of the smoke give identical metrics.
 
-### Metrics
+### Stated limitation: gold information
 
-`metrics.json` is a flat object of numbers only, never booleans, with a fixed key set: `h1a_held`, `h1b_held`,
-`h2_held`, `control_passed`, `control_mismatches`, `p1_flagged_tasks_old`, `p1_flagged_tasks_new`,
-`p1_in_gold_flagged_tasks_new`, `p3_flagged_tasks_old`, `p3_flagged_tasks_new`, `f1_pass_airline_new`,
-`f3_pass_rate_new`, `f6_pass_share_new`, `changed_tasks`, `attempted_old`, `attempted_new`, `errors_old`, `errors_new`,
-`unpaired_comparable`, `records_digest_old`, `records_digest_new`. The key set is fixed so that published numbers stay
-comparable, and a test asserts it exactly.
+`is_gold` and `is_gold_next` tell the policy which actions the gold run uses, standing for an agent that roughly knows
+the right steps. Reaching the gold path is therefore not a result; what each grader does to the remaining choices —
+extra reads, order, altered writes — is.
+
+## Phase 3
+
+### Records and replay (`preflight/trajectories.py`)
+
+- `as_simulation(domain, task, calls, trial=0, trimmed=False)` replays the calls with the adapter's `run`, takes the
+  last `len(calls)` tool messages and writes one message per call plus its live output: the call as
+  `{"id", "name", "arguments", "requestor"}` inside `tool_calls`, the output as
+  `{"role": "tool", "id", "content", "error", "requestor"}`. `reward_info` holds the adapter's grade and the same
+  value as `db_check.db_reward`. `trimmed=True` drops `id` and `error` from tool messages, which is what τ²-bench's
+  `trim_trajectories.py` does; the simulation id is `f"{domain}:{task.id}:{trial}"`.
+- `load(path)` returns the domain from `info.environment_info.domain_name`, the git commit, the embedded tasks keyed by
+  id, and the runs with tool-message ids restored. `restore_ids` gives a tool message without an id the id of the
+  earliest not-yet-answered tool call before it; `calls` reads every tool call in order, taking the requestor from the
+  call and else from the message role.
+- `task_matches(task_dict, task)` compares `get_pydantic_hash` of `Task.model_validate(task_dict)` with the local
+  task's; a mismatch leaves the record with `task_matches: false` and nothing else computed.
+- `replay(domain, task, run)` recomputes the run's live outputs once per process (keyed by domain, task id and the
+  canonical JSON of the calls), compares them with the recorded outputs — JSON-equal where both parse, `KB_search`
+  excluded because its retrieval differs — and regrades the recorded messages: strict first, `strict_replay=False`
+  only where v1.0.1 has that parameter, else `incompatible`. `replay_class` is `full` when the outputs match and the
+  strict regrade works, else the mode. Grades use the adapter's `env_kwargs`, so τ²-bench's read-log allowlist is
+  passed on v1.0.1 and banking is graded as τ²-bench runs it. A run that raises is recorded with its exception type
+  and first line and never stops its file.
+- `diff_tables` uses `suite._db_diff` between the env after the run's calls and the env after the gold calls; there is
+  no second copy of the DB-diff logic.
+- `p1_trigger` is a `call_discoverable_agent_tool` whose inner tool's `tool_kind` is READ, whose inner name the gold
+  run never calls, and whose live output is not an error. `p3_trigger` is a run call with the same tool (inner tool
+  for wrappers) as a gold call and an argument with the same value but a different JSON spelling, wrapper argument
+  strings unpacked first.
+- `schema_floats` resolves each call's tool through the toolkits and reports every whole-number float passed for a
+  parameter whose `openai_schema` type is `integer`; `as_integers` rewrites exactly those values, inside a wrapper's
+  JSON `arguments` string when that is where the value lives.
+- `numeric_pair` compares a run with its integer respelling: outputs equal after whole-number floats become ints
+  everywhere, end states equal under the same normalization, and both rewards. `inconsistency` is true only when
+  neither copy errored at those calls, both comparisons hold and the rewards differ.
+- `late_verification` needs the gold `log_verification`: `log_after_first_write` when the first assistant WRITE (by
+  `tool_kind`, `log_verification` itself excluded) precedes the first `log_verification`, or no verification exists at
+  all; `access_before_facts` compares the first assistant call naming the user (id, email or name from the gold
+  verification) with how many of the four facts the user's own messages already contain, matched after case folding
+  and removing spaces and punctuation. It is `None` when the run has no user message with text, which is the case for
+  every synthetic run. Both are false when the gold run has no `log_verification`.
+- `regrade(paths, out_dir)` writes one JSONL record per run and file, labelled `old` or `new` from the environment's
+  `SOURCE.txt` the same way phase 1 reads its version. The record holds the ids, `task_matches`, `replay_class`,
+  `reward`, `recorded_reward`, `mismatched`, `p1`, `p3`, `diff_tables`, `n_calls`, `nongold_call` (some call, inner
+  tool for wrappers and numbers normalized, is not in the gold run), `schema_floats` and `numeric_pair` on airline,
+  `late_verification` on banking, and `error` when something raised.
+- `flags(phase1_files, out_path)` turns phase 1's G_old per-case files into `{"P1": [...], "P3": [...]}`: a task is
+  listed when a variant of that relation is flagged, P1 only where `inserted_in_gold` is false. The `analyze` and
+  `sample` subcommands import `preflight.trajectory_analysis` lazily, so the replay module never needs numpy.
+
+### Join, H5 and H7 (`preflight/trajectory_analysis.py`)
+
+- Records of the two sides are paired by `id`, the first new-side record of an id being the counterpart. A pair enters
+  H5 when both sides are banking, both carry `task_matches`, the task is in the pool and both sides have a strict or
+  lenient grade. A pair is an event when the two rewards differ.
+- Explained: a P1 trigger on a task phase 1 flagged, with the old side's `diff_tables` exactly
+  `["agent_discoverable_tools"]`; or a P3 trigger on a flagged task with a non-empty old diff whose tables all lie in
+  the three P3 tables. Recall is `explained / events`, its interval a task-clustered percentile bootstrap (2,000
+  resamples, `numpy.random.default_rng(0)`, task ids resampled with replacement). With no events, `recall`, `ci` and
+  `held` are null and `testable` is false; `held = recall >= 0.90 and ci[0] >= 0.75`.
+- Also written: counts per replay class on both sides, the unexplained events one by one with their id, task, diff
+  tables and triggers, each trigger's precision (events among runs carrying it), and three baselines — B1 a run on a
+  flagged task, B2 any call not in gold, B3 above the median call count — each with the event rate on the positive and
+  negative side and their enrichment, null when the negative rate is 0 or missing. Every H5 summary is repeated per
+  git commit and per file stem.
+- H7 is descriptive. Airline: runs under new with schema floats, numeric-pair inconsistencies, and the control events
+  (a verdict difference between the two sides). Banking: reward-1 runs under new with a late log, and with early
+  customer access. `analyze` writes `h5.json`, `h7.json`, `runs.csv` (one row per joined pair) and a short
+  `report.md`.
+
+### H6 sampling (`trajectory_analysis.sample`)
+
+- A run is S4 when its pair is an H5 event; S1 when its new-side reward is 1 and any automated flag fires (a failed
+  WRITE, `late_verification` true, or a WRITE not in gold after dropping arguments equal to the tool's schema default
+  and normalizing numbers); S2 when its reward is 1 with none; S3 when its reward is 0. S4 is taken out of S1-S3, so a
+  run is drawn once. Ids are sorted and drawn with `random.Random(0)`, all of them when a stratum is short, and any
+  shortfall is written to `shortfalls.json`.
+- The draw is shuffled with the same rng and written as `packets/NN.json`: the task instructions, the policy text the
+  file carries when it has one (else the domain's policy file), and the messages. `key.json` holds the packet number,
+  the run id and the stratum, and nothing in a packet names a reward, a stratum, a flag or an id.
+
+### The synthetic experiment (`preflight/phase3.py`)
+
+- `experiment.py --phase 3` (the default) dispatches `python -m preflight.phase3 worker` into each environment, as phase
+  1 does, so one process loads one τ²-bench version and every recorded output comes from the env that grades it.
+- Banking: for every pool task, the gold run, a `trimmed=True` copy, the first P1 variant whose detail starts with
+  `extra agent read`, the P3 variant when the task has one, and the F6 late-verification variant when it has one, as
+  trials 0-4. Airline: every task's gold run and a copy whose integers for integer-schema parameters are floats.
+- The parent writes the synthetic files in each env, regrades them there, writes the flags from the old side's
+  records (`p1` or `p3` true with a reward of 0), joins the two sides with `trajectory_analysis.analyze` and writes the
+  metrics. The run is deterministic: the flags and the metrics are recomputed from per-run records, so two runs give
+  the same numbers.
 
 ## Known limits
 
-- Only the DB-state term decides a verdict; a task whose reward also depends on communication or assertions is covered
-  only for its state term.
-- Tasks whose base run does not score 1 get no variants and stay in the results as "gold not accepted".
-- A relation that cannot be built on a task yields no variant: no write, no gated verification, no read whose required
-  arguments appear in the run, an empty gold run. Counts therefore differ from task to task.
-- F1 cannot separate an empty run from a gold run that does not change the DB, so its counts are reported split by
-  `gold_changes_db`; empty-gold tasks get no F1 at all (amendment 3).
+- Only the DB-state term decides a verdict; a task whose reward also depends on communication or assertions is
+  covered only for its state term.
+- Tasks whose base run does not score 1 get no variants and stay in the results as `gold not accepted`; a relation
+  that cannot be built yields no variant, so counts differ from task to task.
+- F1 cannot separate an empty run from a gold run that does not change the DB, so its counts are split by
+  `gold_changes_db`; empty-gold tasks get no F1 at all.
 - `end_state` is a pair of DB hashes; `db_diff` names top-level fields, not the values inside them.
-- `tau2_version` is the second word of the first line of the environment's `SOURCE.txt`, and is null when the file is
-  missing or that line is too short.
-- `records_sha256` and the side digests cover variant records only: a repeated run that differs in a task's base
-  outcome, gold output fingerprint or static checks keeps the same digest, so the digest is not a full per-case
-  repeatability check.
-- Tool outputs are read as every second message from the end of a trajectory, which holds because the adapter appends
-  one call message and one tool message per call after the task's message history.
-- The static checks replay the gold run once per write, and every P1 candidate replays a prefix, so a suite run costs
-  several replays per task.
+- `records_sha256` and the side digests cover variant records only, so per-case repeatability is checked from the
+  per-case files as well.
 - The airline and retail control assumes those domains grade identically in both versions; a mismatch is treated as a
   fault in this harness, not as a finding.
-- `experiment.py` passes on whatever the subprocesses wrote; it does not recompute the metrics. The independent
-  recompute of amendment 2 is done outside the project, from the per-case files the run leaves behind.
+- Phase 2's policy is open-loop, its action set is built once per task, its grader cache is per run and never saved,
+  and its oracle is ours. A G_old run needs the v1.0.1 interpreter to learn its true success, so the pipeline
+  dispatches that step as a separate process. The smoke is not the full sweep: held-out evaluation, G_proc, H3 and H4
+  are not computed by `--phase 2`.
+- Phase 3 in this build has no real trajectory file: every number comes from synthetic runs built from gold actions,
+  so it shows that the pipeline works, not what published agents did. `access_before_facts` is `None` on synthetic
+  runs because they carry no user message with text. A run's end state is compared as two DB hashes and a list of
+  top-level table names. H6 has no labelers here: the packets and the key are produced, the labels are not, and no
+  population rate can be read off a stratified sample in any case. A file whose incompatible share is high is
+  reported, not tuned around.
