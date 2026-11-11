@@ -116,8 +116,11 @@ def _rate(records, key):
 
 
 def bootstrap(values):
-    """Mean over seeds and its 95% percentile interval."""
+    """Mean over the seeds with data and its 95% percentile interval; NaN when no seed has data."""
     values = np.asarray(values, dtype=float)
+    values = values[~np.isnan(values)]
+    if not len(values):
+        return float("nan"), float("nan"), float("nan")
     rng = np.random.default_rng(phase2.SPLIT_SEED)
     means = values[rng.integers(0, len(values), size=(RESAMPLES, len(values)))].mean(axis=1)
     return float(values.mean()), float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))

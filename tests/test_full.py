@@ -42,6 +42,11 @@ class BootstrapTest(unittest.TestCase):
     def test_no_data_is_nan_not_zero(self):
         self.assertTrue(math.isnan(full._rate([], "true_success")))
 
+    def test_seeds_without_data_are_left_out(self):
+        values = [0.0, 1.0, 0.2, 0.9, 0.4, 0.6, 0.1, 0.8, 0.3]
+        self.assertEqual(full.bootstrap(values + [float("nan")]), full.bootstrap(values))
+        self.assertTrue(all(math.isnan(x) for x in full.bootstrap([float("nan")] * 3)))
+
 
 class RunMeasuresTest(unittest.TestCase):
     def test_last_300_gate_window_and_first_wrong(self):
