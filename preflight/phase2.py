@@ -13,9 +13,9 @@ from pathlib import Path
 import numpy as np
 
 from preflight import report
-from preflight.mdp import actions_fingerprint, allowed, horizon, oracle, order_ok, task_actions, trajectory
+from preflight.mdp import actions_fingerprint, allowed, features, horizon, oracle, order_ok, task_actions, trajectory
 from preflight.relations import _inner_name, calls_as_dicts
-from preflight.rl import DEFAULT_LR, N_FEATURES, GradeCache, Policy, _gold_names, split, train
+from preflight.rl import DEFAULT_LR, N_FEATURES, GradeCache, Policy, _episode, _gold_names, split, train
 from preflight.tau2_adapter import Call, tasks
 
 DOMAIN = "banking_knowledge"
@@ -158,22 +158,10 @@ def _episode_payload(task, actions, made, reward, error, new_reward, extra_reads
     calls = trajectory(actions, made)
     if extra_reads is None:
         extra_reads = _extra_reads(actions, made)
-    if oracle_pending:
-        true_success = None
-        order = None
-        altered = None
-        oracle_error = False
-    elif new_reward is None:
-        true_success = False
-        order = None
-        altered = None
-        oracle_error = True
-    else:
-        result = oracle(task, actions, made, new_reward)
-        true_success = result["true_success"]
-        order = result["order_ok"]
-        altered = result["no_altered"]
-        oracle_error = False
+    result = oracle(task, actions, made, new_reward)
+    true_success = None if oracle_pending else result["true_success"]
+    order, altered = result["order_ok"], result["no_altered"]
+    oracle_error = new_reward is None and not oracle_pending
     return {
         "task_id": getattr(task, "id", None),
         "made": list(made),
@@ -305,6 +293,74 @@ def random_run(condition, seed, task_ids, episodes, out_path, domain=DOMAIN):
     return payload
 
 
+def greedy_made(policy, task, actions):
+    """The most likely action at every step, no sampling and no learning."""
+    made, steps = [], horizon(task)
+    for step in range(steps):
+        candidates = allowed(actions, made)
+        rows = [features(actions, index, made, step, steps) for index in candidates]
+        made.append(candidates[int(np.argmax(policy.probs(task.id, candidates, rows)))])
+        if actions[made[-1]].kind == "stop":
+            break
+    return made
+
+
+def after_gold(policy, task, actions, made):
+    """What an episode does once every gold action is made: STOP at once or not, its later extra reads, and the
+    policy's STOP probability at that point (None when the gold actions were never all made, or were finished on
+    the last step, which leaves no choice)."""
+    gold = {i for i, a in enumerate(actions) if a.kind == "gold"}
+    done = next((p for p in range(len(made)) if gold <= set(made[: p + 1])), None)
+    later, steps = made[done + 1 :] if done is not None else [], horizon(task)
+    if done is None or done + 1 >= steps:
+        none = {"stop_after_gold": None, "reads_after_gold": None, "p_stop_after_gold": None}
+        return {"gold_done": done is not None, **none}
+    state = made[: done + 1]
+    candidates = allowed(actions, state)
+    rows = [features(actions, index, state, done + 1, steps) for index in candidates]
+    stop = next(i for i, index in enumerate(candidates) if actions[index].kind == "stop")
+    return {
+        "gold_done": True,
+        "stop_after_gold": bool(later) and actions[later[0]].kind == "stop",
+        "reads_after_gold": _extra_reads(actions, later),
+        "p_stop_after_gold": float(policy.probs(task.id, candidates, rows)[stop]),
+    }
+
+
+def evaluate_run(condition, run_path, task_ids, episodes_per_task, out_path, domain=DOMAIN):
+    """A trained policy without learning: per task, its greedy episode, then sampled episodes."""
+    started = time.perf_counter()
+    trained = _read_json(run_path)
+    policy = _policy_from_payload(trained["policy"])
+    task_list = _task_list(domain, task_ids)
+    cache = GradeCache(domain)
+    actions_by_id = {task.id: task_actions(domain, task) for task in task_list}
+    records = []
+    for task in task_list:
+        actions, rng = actions_by_id[task.id], random.Random(f"{trained['seed']}:eval:{task.id}")
+        runs = [greedy_made(policy, task, actions)]
+        runs += [
+            _episode(policy, rng, task, actions, horizon(task), _gold_names(actions))[0]
+            for _ in range(episodes_per_task)
+        ]
+        for number, made in enumerate(runs):
+            calls = trajectory(actions, made)
+            reward = _condition_reward(condition, cache, task, calls)
+            new = _new_reward(condition, cache, task, calls)
+            record = _episode_payload(
+                task, actions, made, reward, reward is None, new, oracle_pending=condition == "old"
+            )
+            record["greedy"] = number == 0
+            record.update(after_gold(policy, task, actions, made))
+            records.append(record)
+    seconds = time.perf_counter() - started
+    payload = _run_payload(
+        condition, trained["seed"], domain, task_ids, len(records), records, cache, seconds, actions_by_id, mode="eval"
+    )
+    _write_json(out_path, payload)
+    return payload
+
+
 def oracle_fill(input_path, out_path=None, domain=DOMAIN):
     data = _read_json(input_path)
     episode_ids = {str(item.get("task_id")) for item in data.get("episodes", []) if item.get("task_id") is not None}
@@ -392,7 +448,7 @@ smoke = run_smoke
 def _worker_main(argv):
     parser = argparse.ArgumentParser(prog="python -m preflight.phase2 worker")
     parser.add_argument("--condition", choices=("old", "new", "proc"), default="new")
-    parser.add_argument("--mode", choices=("train", "random", "oracle"), default="train")
+    parser.add_argument("--mode", choices=("train", "random", "oracle", "eval"), default="train")
     parser.add_argument("--out", required=True)
     parser.add_argument("--in", dest="input", default=None)
     parser.add_argument("--episodes", type=int, default=SMOKE_EPISODES)
@@ -408,6 +464,8 @@ def _worker_main(argv):
         train_run(args.condition, args.seed, task_ids, args.episodes, args.out, args.domain, args.lr)
     elif args.mode == "random":
         random_run(args.condition, args.seed, task_ids, args.episodes, args.out, args.domain)
+    elif args.mode == "eval":
+        evaluate_run(args.condition, args.input, task_ids, args.episodes, args.out, args.domain)
     else:
         oracle_fill(args.input or args.out, args.out, args.domain)
     return 0

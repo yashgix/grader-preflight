@@ -150,11 +150,17 @@ class ExperimentTest(unittest.TestCase):
             processes=1,
         )
 
-    def test_full_flag_is_not_offered(self):
-        with mock.patch("preflight.phase2.run_smoke") as smoke:
-            with self.assertRaises(SystemExit):
-                experiment.main(["--out", str(self.out), "--full"])
+    def test_full_flag_runs_the_sweep_not_the_smoke(self):
+        with mock.patch("preflight.full.run_full") as sweep, mock.patch("preflight.phase2.run_smoke") as smoke:
+            experiment.main(["--out", str(self.out), "--full", "--processes", "2"])
+        sweep.assert_called_once_with(Path(self.out).resolve(), experiment.DEFAULT_OLD, experiment.DEFAULT_NEW, 2)
         smoke.assert_not_called()
+
+    def test_full_flag_refuses_other_seeds_or_episodes(self):
+        with mock.patch("preflight.full.run_full") as sweep:
+            with self.assertRaises(SystemExit):
+                experiment.main(["--out", str(self.out), "--full", "--seeds", "0"])
+        sweep.assert_not_called()
 
     def test_unknown_phase_is_rejected(self):
         with self.assertRaises(SystemExit):

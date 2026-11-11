@@ -1,4 +1,4 @@
-"""Run the preflight experiments: phase 1 relations, or the phase 2 smoke run."""
+"""Run the preflight experiments: phase 1 relations, or phase 2 (the smoke run, or the full sweep)."""
 
 import argparse
 import json
@@ -106,6 +106,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--episodes", type=int, default=None)
     parser.add_argument("--seeds", default=None)
     parser.add_argument("--processes", type=int, default=4)
+    parser.add_argument("--full", action="store_true", help="phase 2: the full 10-seed sweep instead of the smoke")
     return parser
 
 
@@ -114,6 +115,13 @@ def main(argv=None) -> int:
     out = Path(args.out)
     if args.phase == 1:
         run(out, args.old_python, args.new_python)
+        return 0
+    if args.full:
+        if args.episodes is not None or args.seeds is not None:
+            raise SystemExit("--full uses the pre-registered seeds and episodes; drop --episodes and --seeds")
+        from preflight.full import run_full
+
+        run_full(out.resolve(), args.old_python, args.new_python, args.processes)
         return 0
     seeds = _parse_seeds(args.seeds)
     run_smoke(

@@ -13,8 +13,8 @@ called: each variant is built from the gold run, from the environment's own tool
 Phase 2 trains a small linear softmax policy over banking tool calls with REINFORCE, once per grader, and asks whether
 the flaw changes what the policy learns. It is a small, faithful RL experiment, not LLM-agent training: the policy is
 open-loop (it sees only the calls it has made and the step number, never a tool output), and every call it makes is a
-real τ²-bench tool call, graded by τ²-bench's own, unchanged grader. This build implements the phase 2 smoke run
-only; the full sweep is a later build and has no `--full` flag here.
+real τ²-bench tool call, graded by τ²-bench's own, unchanged grader. `python experiment.py --full --out PATH` runs the full
+sweep (amendment 6); without `--full` it runs the small feasibility trial.
 
 Hypotheses, thresholds, seeds and the five amendments that fix the protocol are in
 [PREREGISTRATION.md](PREREGISTRATION.md), committed before any experiment. How the pieces fit, and what the checks do
