@@ -1,0 +1,18 @@
+{
+ "attempted_new": 2203,
+ "attempted_old": 2203,
+ "changed_tasks": 26,
+ "control_mismatches": 0,
+ "errors_new": 0,
+ "errors_old": 0,
+ "f1_pass_airline_new": 17,
+ "f3_pass_rate_new": 0.0,
+ "f6_pass_share_new": 1.0,
+ "h1a_held": 1,
+ "h1b_held": 1,
+ "h2_held": 0,
+ "p1_flagged_tasks_new": 0,
+ "p1_flagged_tasks_old": 43,
+ "p3_flagged_tasks_new": 0,
+ "p3_flagged_tasks_old": 25
+}
