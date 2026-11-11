@@ -1,7 +1,6 @@
 """Phase 3 analysis: join regrade records, compute H5/H7 and draw H6's blinded sample."""
 
 import csv
-import importlib.util
 import json
 import random
 from pathlib import Path
@@ -48,30 +47,22 @@ def _canonical(value) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
 
-def _read_records(directory) -> list[dict]:
-    """Every JSONL record in a regrade directory, tagged with the original file's stem."""
-    directory = Path(directory)
-    if not directory.is_dir():
-        return []
-    records = []
-    for path in sorted(directory.glob("*.jsonl")):
+def _read_records(directory, label) -> list[dict]:
+    """Every record of one side (`*.<label>.jsonl`) in a regrade directory, tagged with the source file's stem."""
+    records, seen = [], set()
+    for path in sorted(Path(directory).glob(f"*.{label}.jsonl")):
         stem = _stem(path)
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            continue
-        for line in lines:
-            line = line.strip()
-            if not line:
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip():
                 continue
-            try:
-                record = json.loads(line)
-            except ValueError:
-                continue
+            record = json.loads(line)
             if not isinstance(record, dict):
-                continue
-            record = dict(record)
+                raise ValueError(f"{path}:{number}: not a record")
             record["_stem"] = stem
+            if record.get("id") is not None:  # runs without an id are never paired
+                if run_key(record) in seen:
+                    raise ValueError(f"{path}:{number}: run {run_key(record)} appears twice")
+                seen.add(run_key(record))
             records.append(record)
     return records
 
@@ -278,6 +269,30 @@ def _h5_document(pairs, flags) -> dict:
     return document
 
 
+def _file_counts(old_records, new_records) -> dict:
+    """Per source file and side: runs, task mismatches, errors, incompatible runs and their share (amendment 7
+    reports a file with more than 20% incompatible runs)."""
+    files = {}
+    for side, records in (("old", old_records), ("new", new_records)):
+        for record in records:
+            row = files.setdefault(record["_stem"], {}).setdefault(
+                side, {"runs": 0, "task_mismatch": 0, "errors": 0, "incompatible": 0, "incompatible_reasons": {}}
+            )
+            row["runs"] += 1
+            row["task_mismatch"] += record.get("task_matches") is not True
+            row["errors"] += record.get("error") is not None
+            if record.get("replay_class") == "incompatible":
+                row["incompatible"] += 1
+                reason = str(record.get("incompatible_reason")).split(":")[0]
+                row["incompatible_reasons"][reason] = row["incompatible_reasons"].get(reason, 0) + 1
+    for sides in files.values():
+        for row in sides.values():
+            matched = row["runs"] - row["task_mismatch"]
+            row["incompatible_share"] = row["incompatible"] / matched if matched else None
+            row["over_20pct"] = bool(row["incompatible_share"] and row["incompatible_share"] > 0.20)
+    return dict(sorted(files.items()))
+
+
 def _replay_class_counts(records) -> dict:
     counts = {}
     for record in records:
@@ -442,8 +457,8 @@ def _write_report(path, h5, h7, pairs) -> None:
 
 def analyze(old_dir, new_dir, flags_path, pool_path, out_path):
     """Write h5.json, h7.json, runs.csv and report.md from two regrade directories."""
-    old_records = _read_records(old_dir)
-    new_records = _read_records(new_dir)
+    old_records = _read_records(old_dir, "old")
+    new_records = _read_records(new_dir, "new")
     pool = _pool_ids(pool_path)
     flags = _flags(flags_path)
     pairs = _join(old_records, new_records)
@@ -454,6 +469,7 @@ def analyze(old_dir, new_dir, flags_path, pool_path, out_path):
         "new": _replay_class_counts(new_records),
     }
     h5["all_runs"] = {"old": len(old_records), "new": len(new_records), "joined": len(pairs)}
+    h5["files"] = _file_counts(old_records, new_records)
     h7 = _h7_document(pairs)
     out_path = Path(out_path)
     out_path.mkdir(parents=True, exist_ok=True)
@@ -471,7 +487,7 @@ def _late_true(record) -> bool:
 
 def _failed_write(domain, task, run) -> bool:
     from preflight import trajectories
-    from preflight.relations import tool_error, tool_kind
+    from preflight.relations import tool_kind
 
     env = trajectories._tool_env(domain, task)
     run_calls = trajectories.calls(run.get("messages") or [])
@@ -479,8 +495,11 @@ def _failed_write(domain, task, run) -> bool:
     for index, call in enumerate(run_calls):
         if call.requestor == "user" or tool_kind(env, call) != "write":
             continue
+        if trajectories._tool_name(call) == "log_verification":
+            continue
         output = outputs[index] if index < len(outputs) else None
-        if tool_error(output):
+        content = trajectories._get(output, "content")
+        if trajectories._get(output, "error") or (isinstance(content, str) and content.startswith("Error:")):
             return True
     return False
 
@@ -554,24 +573,15 @@ def _find_policy(value) -> str | None:
 
 
 def _domain_policy(domain) -> str:
-    try:
-        spec = importlib.util.find_spec("tau2")
-    except (ImportError, ValueError):
-        return ""
-    if spec is None or spec.origin is None:
-        return ""
-    root = Path(spec.origin).resolve().parent
-    names = ("policy.md", "policy.txt", "system_prompt.md", "system_prompt.txt")
-    candidates = [root / "domains" / domain / name for name in names]
-    candidates += [root / domain / name for name in names]
-    candidates += [root / "data" / domain / name for name in names]
-    for path in candidates:
-        try:
-            if path.is_file():
-                return path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-    return ""
+    """The policy tau2's env for this domain gives its agent (the offline retrieval variant for banking)."""
+    from tau2.registry import registry
+
+    from preflight import tau2_adapter
+
+    policy = registry.get_env_constructor(domain)(**tau2_adapter.ENV_KWARGS.get(domain, {})).get_policy()
+    if not policy:
+        raise ValueError(f"no policy for {domain}")
+    return policy
 
 
 def _instructions(task) -> str:
@@ -609,7 +619,11 @@ def _load_source_files(paths) -> dict[tuple[str, str], dict]:
         for run in loaded.get("runs") or []:
             embedded = loaded.get("tasks", {}).get(str(run.get("task_id")))
             task = local[domain].get(str(run.get("task_id")))
-            entries[(_stem(path), str(run.get("id")))] = {
+            key = (_stem(path), str(run.get("id")))
+            if key in entries:
+                raise ValueError(f"run {key} appears twice in the source files")
+            entries[key] = {
+                "source": str(path),
                 "run": run,
                 "task": embedded,
                 "local_task": task
@@ -627,8 +641,17 @@ def _packet(entry) -> dict:
     return {
         "task_instructions": _instructions(entry.get("task")),
         "policy": policy,
-        "messages": entry.get("run", {}).get("messages") or [],
+        "messages": [_blind(message) for message in entry["run"].get("messages") or []],
     }
+
+
+def _blind(message) -> dict:
+    """Role, text, tool calls (name, arguments) and tool output: no ids, timestamps, costs, usage or raw responses,
+    which could reveal the run or the model."""
+    out = {"role": message.get("role"), "content": message.get("content")}
+    if message.get("tool_calls"):
+        out["tool_calls"] = [{"name": c.get("name"), "arguments": c.get("arguments")} for c in message["tool_calls"]]
+    return out
 
 
 def _strata(pairs, pool, entries) -> dict[str, set[tuple[str, str]]]:
@@ -642,13 +665,11 @@ def _strata(pairs, pool, entries) -> dict[str, set[tuple[str, str]]]:
         reward = float(new["reward"])
         if _h5_eligible(old, new, pool) and _event(old, new):
             s4.add(run_id)
+        if run_id not in entries:
+            raise ValueError(f"run {run_id} has no source run: pass every regraded file with --files")
         if reward == 1.0:
-            entry = entries.get(run_id)
-            flagged = (
-                _process_flag(entry.get("domain"), entry.get("local_task"), entry.get("run"), new)
-                if entry
-                else _late_true(new)
-            )
+            entry = entries[run_id]
+            flagged = _process_flag(entry["domain"], entry["local_task"], entry["run"], new)
             (s1 if flagged else s2).add(run_id)
         elif reward == 0.0:
             s3.add(run_id)
@@ -657,8 +678,8 @@ def _strata(pairs, pool, entries) -> dict[str, set[tuple[str, str]]]:
 
 def sample(old_dir, new_dir, flags_path, pool_path, files, out_path):
     """Draw H6's stratified 24-run sample and write blinded packets plus the key."""
-    old_records = _read_records(old_dir)
-    new_records = _read_records(new_dir)
+    old_records = _read_records(old_dir, "old")
+    new_records = _read_records(new_dir, "new")
     pool = _pool_ids(pool_path)
     _flags(flags_path)  # the flags file is required by the interface; H6 strata use the records themselves
     pairs = _join(old_records, new_records)
@@ -685,13 +706,13 @@ def sample(old_dir, new_dir, flags_path, pool_path, files, out_path):
         old_packet.unlink(missing_ok=True)
     key = []
     for stratum, run_id in selected:
-        entry = entries.get(run_id)
-        if entry is None:
-            continue
+        entry = entries[run_id]
         number = len(key) + 1
         packet_name = f"{number:02d}.json"
         _write_json(packets / packet_name, _packet(entry))
-        key.append({"packet": number, "file": run_id[0], "run_id": run_id[1], "stratum": stratum})
+        key.append(
+            {"packet": number, "file": run_id[0], "source": entry["source"], "run_id": run_id[1], "stratum": stratum}
+        )
     _write_json(out_path / "key.json", key)
     if shortfalls:
         _write_json(out_path / "shortfalls.json", shortfalls)

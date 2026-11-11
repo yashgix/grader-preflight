@@ -549,5 +549,33 @@ class VersionLabelTest(unittest.TestCase):
         self.assertIn(trajectories.version_label(), {"old", "new"})
 
 
+class ReviewRegressionTest(unittest.TestCase):
+    def test_task_match_ignores_key_order(self):
+        task = next(t for t in tasks(BANK) if t.id == "task_005")
+        shuffled = json.loads(json.dumps(json.loads(task.model_dump_json()), sort_keys=True))
+        self.assertTrue(trajectories.task_matches(shuffled, task))
+
+    def test_spelling_differs_needs_equal_values(self):
+        self.assertTrue(trajectories._spelling_differs([1, 2], [1.0, 2]))
+        self.assertFalse(trajectories._spelling_differs([1, 2], [1.0, 3]))
+        self.assertFalse(trajectories._spelling_differs({"a": 1, "b": 2}, {"a": 1.0, "b": 3}))
+
+    def test_regrade_refuses_two_files_with_one_name(self):
+        task = next(t for t in tasks(BANK) if t.id == "task_005")
+        sim = trajectories.as_simulation(BANK, task, gold_calls(task))
+        payload = {
+            "info": {"environment_info": {"domain_name": BANK}},
+            "tasks": [json.loads(task.model_dump_json())],
+            "simulations": [sim],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for sub in ("a", "b"):
+                (root / sub).mkdir()
+                (root / sub / "banking.json").write_text(json.dumps(payload))
+            with self.assertRaises(ValueError):
+                trajectories.regrade([root / "a" / "banking.json", root / "b" / "banking.json"], root / "out")
+
+
 if __name__ == "__main__":
     unittest.main()

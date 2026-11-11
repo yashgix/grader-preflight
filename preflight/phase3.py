@@ -90,10 +90,6 @@ def _banking_file(path: Path) -> None:
     _write_results(path, BANK, task_dicts, simulations)
 
 
-def _integer_parameter(declared) -> bool:
-    return trajectories._integer_parameter(declared)
-
-
 def _float_call(domain: str, call: Call) -> Call:
     """The same call with every integer value for an integer-schema parameter turned into a float."""
     tool = trajectories._tool_for(domain, call, trajectories._tool_name(call))
@@ -104,7 +100,11 @@ def _float_call(domain: str, call: Call) -> Call:
         inner = dict(trajectories._inner_args(call))
         changed = False
         for name, value in list(inner.items()):
-            if isinstance(value, int) and not isinstance(value, bool) and _integer_parameter(properties.get(name)):
+            if (
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and trajectories._integer_parameter(properties.get(name))
+            ):
                 inner[name] = float(value)
                 changed = True
         if not changed:
@@ -115,7 +115,11 @@ def _float_call(domain: str, call: Call) -> Call:
     arguments = dict(call.arguments or {})
     changed = False
     for name, value in list(arguments.items()):
-        if isinstance(value, int) and not isinstance(value, bool) and _integer_parameter(properties.get(name)):
+        if (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and trajectories._integer_parameter(properties.get(name))
+        ):
             arguments[name] = float(value)
             changed = True
     if not changed:
@@ -151,7 +155,7 @@ def worker(out_dir) -> None:
 
 
 def _write_flags(regrade_dir: Path, path: Path) -> dict:
-    records = trajectory_analysis._read_records(regrade_dir)
+    records = trajectory_analysis._read_records(regrade_dir, "old")
     p1 = set()
     p3 = set()
     for record in records:
@@ -248,8 +252,8 @@ def run_phase3(out_path, old_python: str = DEFAULT_OLD, new_python: str = DEFAUL
         old_dir / "regrade", new_dir / "regrade", flags_path, POOL_PATH, analysis_dir
     )
 
-    old_records = trajectory_analysis._read_records(old_dir / "regrade")
-    new_records = trajectory_analysis._read_records(new_dir / "regrade")
+    old_records = trajectory_analysis._read_records(old_dir / "regrade", "old")
+    new_records = trajectory_analysis._read_records(new_dir / "regrade", "new")
     metrics = _metrics(old_records, new_records, analysis)
     out_path.write_text(json.dumps(metrics, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return metrics

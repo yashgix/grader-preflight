@@ -138,21 +138,16 @@ def _strings(value) -> list[str]:
 
 
 def _task_hash(task) -> str:
-    """tau2's own task hash when the helper exists, else its JSON dump, which equal tasks share."""
-    try:
-        from tau2.utils.utils import get_pydantic_hash
-    except ImportError:
-        return task.model_dump_json()
+    """tau2's own task hash (independent of key order in the file)."""
+    from tau2.utils.pydantic_utils import get_pydantic_hash
+
     return get_pydantic_hash(task)
 
 
 def task_matches(task_dict, task) -> bool:
     if not isinstance(task_dict, dict) or task is None:
         return False
-    try:
-        return _task_hash(Task.model_validate(task_dict)) == _task_hash(task)
-    except Exception:
-        return False
+    return _task_hash(Task.model_validate(task_dict)) == _task_hash(task)
 
 
 def restore_ids(messages) -> list:
@@ -240,21 +235,18 @@ def _grade_run(domain, task, run_calls):
 
 
 def _grade_recorded(domain, task, run_messages):
-    """(mode, reward) for recorded messages: strict, else lenient where v1.0.1 has the flag, else incompatible."""
+    """(mode, reward, why) for recorded messages: strict, else lenient where v1.0.1 has the flag, else incompatible
+    with the last replay error's type and first line."""
     converted = _messages(run_messages)
-    if not _STRICT_REPLAY:
+    attempts = (("strict", True), ("lenient", False)) if _STRICT_REPLAY else (("strict", None),)
+    why = None
+    for mode, strict in attempts:
         try:
-            return "strict", _grade_messages(domain, task, converted)
-        except Exception:
-            return "incompatible", None
-    try:
-        return "strict", _grade_messages(domain, task, converted, strict=True)
-    except Exception:
-        pass
-    try:
-        return "lenient", _grade_messages(domain, task, converted, strict=False)
-    except Exception:
-        return "incompatible", None
+            kwargs = {} if strict is None else {"strict": strict}
+            return mode, _grade_messages(domain, task, converted, **kwargs), None
+        except Exception as exc:  # a replay that raises is what "incompatible" means; keep why
+            why = f"{type(exc).__name__}: {str(exc).splitlines()[0][:200] if str(exc) else ''}"
+    return "incompatible", None, why
 
 
 def as_simulation(domain, task, calls, trial=0, trimmed=False) -> dict:
@@ -343,13 +335,14 @@ def replay(domain, task, run) -> dict:
         actual = replayed[index] if index < len(replayed) else None
         if _parsed(expected) != _parsed(actual):
             mismatched.append({"index": index, "name": _tool_name(call)})
-    mode, reward = _grade_recorded(domain, task, run_messages)
+    mode, reward, why = _grade_recorded(domain, task, run_messages)
     outputs_equal = not mismatched
     return {
         "outputs_equal": outputs_equal,
         "mismatched": mismatched,
         "mode": mode,
         "reward": reward,
+        "incompatible_reason": why,
         "replay_class": "full" if outputs_equal and mode == "strict" else mode,
     }
 
@@ -390,9 +383,9 @@ def _spelling_differs(left, right) -> bool:
     if isinstance(left, (int, float)) and isinstance(right, (int, float)):
         return left == right and isinstance(left, float) != isinstance(right, float)
     if isinstance(left, list) and isinstance(right, list):
-        return len(left) == len(right) and any(_spelling_differs(a, b) for a, b in zip(left, right))
+        return left == right and any(_spelling_differs(a, b) for a, b in zip(left, right))
     if isinstance(left, dict) and isinstance(right, dict):
-        return all(key in right for key in left) and any(_spelling_differs(left[key], right[key]) for key in left)
+        return left == right and any(_spelling_differs(left[key], right[key]) for key in left)
     return False
 
 
@@ -649,6 +642,7 @@ def _computed(domain, task, run) -> dict:
     graded = replay(domain, task, run)
     computed = {
         "replay_class": graded["replay_class"],
+        "incompatible_reason": graded["incompatible_reason"],
         "reward": graded["reward"],
         "mismatched": graded["mismatched"],
         "n_calls": len(run_calls),
@@ -674,6 +668,7 @@ def _record(domain, git_commit, run, task, task_dict) -> dict:
         "git_commit": git_commit,
         "task_matches": False,
         "replay_class": None,
+        "incompatible_reason": None,
         "reward": None,
         "recorded_reward": run.get("recorded_reward"),
         "mismatched": None,
@@ -686,12 +681,13 @@ def _record(domain, git_commit, run, task, task_dict) -> dict:
         "numeric_pair": None,
         "late_verification": None,
     }
-    if task is None or not task_matches(task_dict, task):
+    if task is None:
         return record
-    record["task_matches"] = True
     try:
-        record.update(_computed(domain, task, run))
-    except Exception as exc:
+        record["task_matches"] = task_matches(task_dict, task)
+        if record["task_matches"]:
+            record.update(_computed(domain, task, run))
+    except Exception as exc:  # recorded per run; one bad run never stops the file
         lines = str(exc).splitlines()
         record["error"] = {"type": type(exc).__name__, "message": lines[0][:200] if lines else ""}
     return record
@@ -722,6 +718,10 @@ def regrade(paths, out_dir) -> list[Path]:
             task = local.get(str(task_id)) if task_id is not None else None
             records.append(_record(domain, result.get("git_commit"), entry, task, result["tasks"].get(task_id)))
         target = target_dir / f"{Path(path).stem}.{label}.jsonl"
+        if target in written:
+            raise ValueError(
+                f"two input files share the name {Path(path).stem!r}; rename one so neither is overwritten"
+            )
         target.write_text("".join(json.dumps(record, sort_keys=True) + "\n" for record in records), encoding="utf-8")
         written.append(target)
     return written

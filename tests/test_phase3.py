@@ -20,6 +20,7 @@ BASE_RECORD_KEYS = {
     "git_commit",
     "task_matches",
     "replay_class",
+    "incompatible_reason",
     "reward",
     "recorded_reward",
     "mismatched",
@@ -95,12 +96,12 @@ def _new_records():
 
 class IntegerParameterTest(unittest.TestCase):
     def test_only_integer_schemas_count(self):
-        self.assertTrue(phase3._integer_parameter({"type": "integer"}))
-        self.assertTrue(phase3._integer_parameter({"type": ["integer", "null"]}))
-        self.assertFalse(phase3._integer_parameter({"type": "number"}))
-        self.assertFalse(phase3._integer_parameter({"type": "string"}))
-        self.assertFalse(phase3._integer_parameter({"type": "boolean"}))
-        self.assertFalse(phase3._integer_parameter(None))
+        self.assertTrue(trajectories._integer_parameter({"type": "integer"}))
+        self.assertTrue(trajectories._integer_parameter({"type": ["integer", "null"]}))
+        self.assertFalse(trajectories._integer_parameter({"type": "number"}))
+        self.assertFalse(trajectories._integer_parameter({"type": "string"}))
+        self.assertFalse(trajectories._integer_parameter({"type": "boolean"}))
+        self.assertFalse(trajectories._integer_parameter(None))
 
 
 class FloatCallTest(unittest.TestCase):

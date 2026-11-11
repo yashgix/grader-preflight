@@ -216,8 +216,8 @@ class AnalyzeTest(unittest.TestCase):
             root = Path(temporary)
             old = _record("r1", reward=0.0, p1=True, diff_tables=["agent_discoverable_tools"])
             new = _record("r1", reward=1.0)
-            _write_records(root / "old", "banking", [old])
-            _write_records(root / "new", "banking", [new])
+            _write_records(root / "old", "banking.old", [old])
+            _write_records(root / "new", "banking.new", [new])
             flags = _write_json(root / "flags.json", {"P1": ["task_001"], "P3": []})
             pool = _write_json(root / "pool.json", {"tasks": ["task_001"]})
 
@@ -240,7 +240,13 @@ class StrataTest(unittest.TestCase):
         pairs = self._pairs()
         pairs[0][1]["late_verification"] = {"log_after_first_write": True, "access_before_facts": None}
         entries = {
-            ("f", run_id): {"domain": "", "task": {"id": "task_001"}, "run": {"id": run_id, "messages": []}}
+            ("f", run_id): {
+                "domain": "",
+                "source": "f.json",
+                "task": {"id": "task_001"},
+                "local_task": None,
+                "run": {"id": run_id, "messages": []},
+            }
             for run_id in ("s1", "s2", "s3", "s4")
         }
         strata = trajectory_analysis._strata(pairs, {"task_001"}, entries)
@@ -268,15 +274,17 @@ class SampleTest(unittest.TestCase):
                 _record("s3", reward=0.0),
                 _record("s4", reward=1.0),
             ]
-            _write_records(root / "old", "banking", old_records)
-            _write_records(root / "new", "banking", new_records)
+            _write_records(root / "old", "banking.old", old_records)
+            _write_records(root / "new", "banking.new", new_records)
             flags = _write_json(root / "flags.json", {"P1": [], "P3": []})
             pool = _write_json(root / "pool.json", {"tasks": ["task_001"]})
             entries = {
                 ("banking", run_id): {
                     "domain": "",
-                    "policy": "",
+                    "policy": "Bank policy.",
+                    "source": "banking.json",
                     "task": {"id": "task_001"},
+                    "local_task": None,
                     "run": {"id": run_id, "messages": [{"role": "user", "content": "plain"}]},
                 }
                 for run_id in ("s1", "s2", "s3", "s4")
@@ -299,6 +307,73 @@ class SampleTest(unittest.TestCase):
                     self.assertNotIn(run_id, text)
             key_data = _read_json(out / "key.json")
             self.assertEqual({(item["file"], item["run_id"]) for item in key_data}, set(entries))
+
+
+class ReviewRegressionTest(unittest.TestCase):
+    def test_failed_write_reads_recorded_dict_messages(self):
+        from preflight import trajectories
+        from preflight.tau2_adapter import gold_calls, tasks
+
+        task = next(t for t in tasks(BANK) if t.id == "task_005")
+        sim = trajectories.as_simulation(BANK, task, gold_calls(task))
+        run = {"id": sim["id"], "messages": trajectories.restore_ids(sim["messages"])}
+        self.assertFalse(trajectory_analysis._failed_write(BANK, task, run))
+        names = [c["name"] for m in run["messages"] for c in m.get("tool_calls") or []]
+        tools = [m for m in run["messages"] if m["role"] == "tool"]
+        tools[names.index("log_verification")].update(error=True, content="Error: not logged")
+        self.assertFalse(trajectory_analysis._failed_write(BANK, task, run))
+        tools[names.index("change_user_email")].update(error=True, content="Error: no such user")
+        self.assertTrue(trajectory_analysis._failed_write(BANK, task, run))
+
+    def test_each_side_reads_only_its_label_and_rejects_duplicates(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _write_records(root, "f.old", [_record("r1", reward=0.0)])
+            _write_records(root, "f.new", [_record("r1", reward=1.0)])
+            old = trajectory_analysis._read_records(root, "old")
+            new = trajectory_analysis._read_records(root, "new")
+            self.assertEqual([(r["id"], r["reward"]) for r in old], [("r1", 0.0)])
+            self.assertEqual(len(trajectory_analysis._join(old, new)), 1)
+            _write_records(root, "f.old", [_record("r1"), _record("r1")])
+            with self.assertRaises(ValueError):
+                trajectory_analysis._read_records(root, "old")
+
+    def test_packets_drop_ids_costs_and_raw_responses(self):
+        message = {
+            "role": "assistant",
+            "content": "Done.",
+            "id": "msg-1",
+            "timestamp": "t",
+            "cost": 0.1,
+            "usage": {"prompt_tokens": 3},
+            "raw_data": {"model": "some-model"},
+            "tool_calls": [{"id": "call_1", "name": "freeze", "arguments": {"card": "c"}, "requestor": "assistant"}],
+        }
+        self.assertEqual(
+            trajectory_analysis._blind(message),
+            {"role": "assistant", "content": "Done.", "tool_calls": [{"name": "freeze", "arguments": {"card": "c"}}]},
+        )
+
+    def test_baseline_recall_is_the_share_of_all_events(self):
+        pairs = [
+            (_record("a", reward=0.0), _record("a", reward=1.0)),
+            (_record("b", reward=1.0), _record("b", reward=1.0)),
+            (_record("c", reward=1.0), _record("c", reward=1.0)),
+            (_record("d", reward=0.0), _record("d", reward=1.0)),
+        ]
+        result = trajectory_analysis._baseline(pairs, lambda pair: pair[0]["id"] in ("a", "b", "c"))
+        self.assertEqual(result["recall"], 0.5)  # 1 of the 2 events is positive
+        self.assertAlmostEqual(result["rate_positive"], 1 / 3)
+
+    def test_file_counts_flag_a_file_over_20_percent_incompatible(self):
+        old = [_record(f"r{i}", replay_class="incompatible" if i < 3 else "full", _stem="f") for i in range(10)]
+        for record in old[:3]:
+            record["incompatible_reason"] = "ValueError: replayed output differs"
+        new = [_record(f"r{i}", _stem="f") for i in range(10)]
+        counts = trajectory_analysis._file_counts(old, new)["f"]
+        self.assertEqual((counts["old"]["incompatible"], counts["old"]["over_20pct"]), (3, True))
+        self.assertEqual(counts["old"]["incompatible_reasons"], {"ValueError": 3})
+        self.assertFalse(counts["new"]["over_20pct"])
 
 
 if __name__ == "__main__":
