@@ -8,8 +8,11 @@ later, outside the build.
 import argparse
 import inspect
 import json
+import os
 import re
 from pathlib import Path
+
+os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"  # before tau2 loads litellm: no network for its cost map
 
 from tau2.data_model.message import AssistantMessage, SystemMessage, ToolMessage, UserMessage
 from tau2.data_model.tasks import Task
@@ -519,9 +522,7 @@ def numeric_pair(domain, task, run_calls) -> dict:
     states_equal = _state_dump(domain, task, run_calls) == _state_dump(domain, task, integer_calls)
     reward_float = _grade_run(domain, task, run_calls)
     reward_int = _grade_run(domain, task, integer_calls)
-    inconsistency = bool(
-        not errors_at_found and outputs_equal and states_equal and reward_float != reward_int
-    )
+    inconsistency = bool(not errors_at_found and outputs_equal and states_equal and reward_float != reward_int)
     return {
         "found": found,
         "errors_at_found": errors_at_found,
@@ -716,10 +717,10 @@ def regrade(paths, out_dir) -> list[Path]:
         domain = result.get("domain")
         local = {task.id: task for task in _domain_tasks(domain)} if domain else {}
         records = []
-        for run in result.get("runs") or []:
-            task_id = run.get("task_id")
+        for entry in result.get("runs") or []:
+            task_id = entry.get("task_id")
             task = local.get(str(task_id)) if task_id is not None else None
-            records.append(_record(domain, result.get("git_commit"), run, task, result["tasks"].get(task_id)))
+            records.append(_record(domain, result.get("git_commit"), entry, task, result["tasks"].get(task_id)))
         target = target_dir / f"{Path(path).stem}.{label}.jsonl"
         target.write_text("".join(json.dumps(record, sort_keys=True) + "\n" for record in records), encoding="utf-8")
         written.append(target)

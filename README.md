@@ -328,12 +328,6 @@ actions and says nothing about published agents. `access_before_facts` is `None`
 
 ## About
 
-Epsilab's site is titled Epsilab | Long-Horizon RL Environments for Agent Training (<https://epsilab.com/>) and the
-team describes itself as building high-fidelity RL environments for real-world agents.
-(<https://epsilab.com/blog/hello-from-the-training-grounds>). The same post lists planned Deep dives on how we build
-environments and verifiers.
-
-This project is an inference from that work rather than a company claim: a grader is the part of an environment that
-decides whether a rollout succeeded, so a cheap check on it is worth having before training against it, a grader flaw
-is worth measuring in what a policy actually learns, and a grader flaw is worth auditing in runs that are already
-published.
+Why this project: a grader is the part of an environment that decides whether a rollout succeeded, so a cheap check
+on it is worth having before training against it, a grader flaw is worth measuring in what a policy actually learns,
+and a grader flaw is worth auditing in runs that are already published.

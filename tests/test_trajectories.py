@@ -40,11 +40,7 @@ def _verification_task(scan=30):
             continue
         env = fresh_env(BANK, task)
         kinds = [tool_kind(env, call) for call in gold]
-        writes = [
-            index
-            for index, kind in enumerate(kinds)
-            if kind == WRITE and gold[index].name != "log_verification"
-        ]
+        writes = [index for index, kind in enumerate(kinds) if kind == WRITE and gold[index].name != "log_verification"]
         if writes and min(writes) > starts[0]:
             return task
     return None
@@ -183,7 +179,9 @@ class FormatTest(unittest.TestCase):
         self.assertEqual(record["id"], f"{self.domain}:{self.task.id}:1")
         self.assertEqual(record["recorded_reward"], self.trimmed["reward_info"]["reward"])
         tool_messages = [message for message in record["messages"] if message.get("role") == "tool"]
-        self.assertEqual([message["id"] for message in tool_messages], [f"call_{index}" for index in range(len(self.gold))])
+        self.assertEqual(
+            [message["id"] for message in tool_messages], [f"call_{index}" for index in range(len(self.gold))]
+        )
 
 
 class RestoreIdsTest(unittest.TestCase):
@@ -216,7 +214,11 @@ class CallsTest(unittest.TestCase):
     def test_requestor_comes_from_the_call_else_the_message_role(self):
         messages = [
             {"role": "user", "content": None, "tool_calls": [{"name": "check", "arguments": {"a": 1}}]},
-            {"role": "assistant", "content": None, "tool_calls": [{"name": "read", "arguments": {}, "requestor": "user"}]},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"name": "read", "arguments": {}, "requestor": "user"}],
+            },
             {"role": "assistant", "content": None, "tool_calls": [{"name": "write", "arguments": {"b": 2}}]},
             {"role": "tool", "content": "{}"},
         ]
@@ -430,7 +432,10 @@ class NumericPairTest(unittest.TestCase):
 
     def test_different_outputs_are_not_an_inconsistency(self):
         with (
-            mock.patch("preflight.trajectories._live_outputs", side_effect=[[_ToolMessage('{"a": 1}')], [_ToolMessage('{"a": 2}')]]),
+            mock.patch(
+                "preflight.trajectories._live_outputs",
+                side_effect=[[_ToolMessage('{"a": 1}')], [_ToolMessage('{"a": 2}')]],
+            ),
             mock.patch("preflight.trajectories._state_dump", return_value="state"),
             mock.patch("preflight.trajectories._grade_run", side_effect=[1.0, 0.0]),
         ):
@@ -503,9 +508,7 @@ class RegradeTest(unittest.TestCase):
         simulation = trajectories.as_simulation(BANK, self.task, gold, trial=0)
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary)
-            source = _write_results(
-                folder / "banking.json", BANK, self.task.model_dump(mode="json"), [simulation]
-            )
+            source = _write_results(folder / "banking.json", BANK, self.task.model_dump(mode="json"), [simulation])
             written = trajectories.regrade([source], folder / "regrade")
             self.assertEqual(len(written), 1)
             self.assertEqual(written[0].name, f"banking.{trajectories.version_label()}.jsonl")
