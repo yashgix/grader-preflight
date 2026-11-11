@@ -209,3 +209,104 @@ Written after the phase 1 results were seen; hypotheses H3 and H4 and every thre
   cannot differ between conditions.
 - **Feasibility first.** A trial (5 train tasks, 3 seeds, G_old and G_new) checks learning against a random policy
   and measures runtime before the full sweep. It is feasibility evidence only and is not used for any hypothesis.
+
+### 6. Full-sweep settings and an exploratory post-trial measure (10 Nov 2026, after the feasibility trial, before the full run)
+
+Written after the feasibility trial (5 tasks, 3 seeds) was seen. H3, H4 and every threshold are unchanged.
+
+- **Tuning, retail only.** Learning rate from {0.03, 0.1, 0.3}, seeds 0-2, 2,000 episodes, on 30 retail tasks whose
+  empty run fails (drawn with seed 20261110); the rate with the highest mean true success over the last 300
+  episodes, a tie going to the smaller one. The same rate and settings for every grader.
+- **The sweep.** Seeds 0-9 for each of G_old, G_new and G_proc, 3,000 episodes on the 30 train tasks; a random
+  policy per seed; held-out tasks: 100 sampled episodes per task from the final policy, without learning. Every seed
+  is reported, converged or not (converged: true success above 0.8 on the last 300 episodes). Nothing is excluded.
+- **Intervals and H4's "no gain".** Means over seeds with percentile bootstrap intervals (10,000 resamples, seed
+  20261110). "No gain in true success" means the 95% interval of the paired difference (G_old minus G_new) does
+  not lie entirely above 0.
+- **H3's classes.** A late verification (order violation) is F6's class, which phase 1 flagged on both graders. An
+  altered write, or anything else, has no phase 1 relation and counts as a miss. With no finds, H3 holds trivially,
+  and the report says so.
+- **Exploratory, post-trial, not a hypothesis test.** Per seed, the greedy policy (its most likely action at every
+  step, no learning) on the train tasks: completion rate, whether it stops right after the gold steps, its extra
+  lookups after them (out of the 3 spare slots) and its STOP probability there, with the G_old minus G_new
+  difference. Each version's verdict on the gold run followed by 0 to 3 extra lookups, to tell tolerance (the same
+  verdict with or without them) from punishment; a 0/1 verdict cannot reward them more. The trial motivated this:
+  lookups under G_new came after the task was done, and non-converged G_old seeds confounded the training mean.
+- **Details fixed after an independent review of the sweep code, still before the run.** Evaluation: per task, 1
+  greedy and 100 sampled episodes from the final policy, on train and held-out tasks. H3 counts the training episodes
+  of G_old and G_new only; distinct means the same task and the same ordered calls; an episode whose G_new grading
+  raised is left out and counted. Its classes: G_new rejects it (a miss); a late verification alone (F6's class,
+  flagged); an altered write, or both checks failing (a miss). An extra read is a read of a tool the gold run never
+  calls (the reads #329 logs); a repeated read of a gold tool is not one, as P1 counts `inserted_in_gold` apart. If
+  the gate fails, H3 and H4 are reported as not tested, since the pre-registration keeps RL only when it passes.
+- **Reading the results.** Every grader has the same actions and the same 3 spare slots, so differences between
+  graders are reward-induced; how many lookups fit after the task is done is set by the spare slots, not the grader.
+
+### 7. Held-out validation on published real-agent trajectories (11 Nov 2026, before any held-out file is downloaded)
+
+Phases 1-2, their relations, thresholds and results are unchanged. This is **held-out retrospective validation,
+not prospective prediction**: P1 and P3 were designed knowing #329 and #397, so the informative output is what the
+preflight does not explain.
+
+- **Already seen (disclosure).** The 10 Nov leaderboard metadata of all submissions (tau2-bench `main` `c06b07d`)
+  and the sizes of their trajectory files. Three development files, inspected in full: the banking files of
+  `cortex-0-1_principledmachines_2026-10-20`, `glm-5-think_sierra_2026-03-02` and `gpt-5-2-none_sierra_2026-02-26`.
+  On those, G_old and G_new disagree on 1/304, 0/243 and 6/63 paired runs, all G_old false rejects, 6 of 7 on
+  P1-flagged tasks (task_049 is not); a heuristic process audit found mostly argument-spelling and default-value
+  false alarms. These submissions (all their files) never enter primary results.
+- **Versions.** G_old = `pre-v1.0.1`, G_new = `v1.0.1`, the existing envs. "The fixed grader" means v1.0.1, the
+  version that scores the 1.x leaderboard. v2.0.0 (19 Oct 2026) changed evaluation and is not tested; nothing is
+  claimed about it.
+- **Held-out stage 1, chosen by rule from the metadata.** Text modality, trajectories available, development
+  submissions excluded. Banking before 14 Jul 2026, top 2 by banking pass^1 from distinct providers:
+  `gpt-5-5_sierra_2026-05-05`, `claude-opus-4-7_sierra_2026-05-05`. Banking after 22 Jul 2026, same rule:
+  `qwen3-8-max_sierra_2026-08-04`, `claude-opus-5_sierra_2026-08-04`. Airline, top 2 by airline pass^1 from
+  distinct providers: `claude-opus-4-5_sierra_2026-02-26`, `gpt-5-2_sierra_2026-02-26`. A file's era is decided by
+  its embedded task hashes; a file matching the other era moves group and is reported. Files are checksummed,
+  stored outside this repo, never redistributed; public output is aggregate counts with attribution. More files
+  only by a further amendment, decided from stage 1's interval widths alone.
+- **Representativeness.** The rule picks high-scoring agents on purpose (they reach the states where grading
+  matters). Results describe these agents' runs and do not generalize to all agents.
+- **Unit and inclusion.** A run is (submission, task, trial). Banking runs enter when the task definition hash is
+  identical in both versions, the task is not one of phase 1's 26 fixture-changed tasks, the reward basis includes
+  DB, and both graders can regrade it. Each run gets a replay class: full (every output equal; `KB_search` excluded,
+  its retrieval differs), strict regrade, lenient regrade (v1.0.1 only), incompatible. Incompatible runs are counted
+  and reported.
+- **H5, coverage of real grading errors (banking).** Event: G_old and G_new verdicts differ. Explained: the run
+  contains the trigger of a phase 1 relation that flagged this task on G_old, and the G_old DB diff (agent env vs
+  gold env) lies only in that relation's tables (P1: a successful discoverable-tool read not in gold, table
+  `agent_discoverable_tools`; P3: a numeric argument equal in value to gold's, spelled differently, phase 1's P3
+  tables). Primary: recall = explained / all events, 95% task-clustered bootstrap interval (2,000 resamples, seed
+  0). **H5 holds** if recall ≥ 0.90 and the lower bound ≥ 0.75. With no events, recall is undefined and H5 is
+  reported as not testable on stage 1, neither held nor failed. Every unexplained event is traced and classified
+  with evidence (fixture or task-data change, task-definition fix, other grader change, candidate new relation,
+  unknown); task_049 is traced too, reported apart. Secondary, not hypotheses: run-level precision of each trigger
+  (near 1 by construction, a mechanism check); enrichment over baselines (B1 the task-level flag alone, B2 any call
+  not in gold, B3 run length); everything split by agent and era. Control: held-out airline runs, expected 0 events.
+- **H6 pilot, failures the fixed grader misses (banking).** 24 held-out banking runs regradable under G_new, seed
+  0, in strata: S1 8 with reward 1 and any automated process flag; S2 8 with reward 1 and none; S3 4 with reward 0;
+  S4 4 H5 events. Shuffled; labelers see the task instructions, the banking policy, the conversation and the tool
+  calls and outputs, never the reward, stratum, flags or hypotheses. Codebook per run (yes/no with a quote): a tool
+  call failed, and whether the agent then recovered correctly (an observable event, not by itself a violation); a
+  write hit the wrong entity or was not requested; customer data read or changed before 2 of the 4 verification
+  facts were given; verification log missing or after the first write; customer data disclosed before
+  verification; a false or missing statement to the user about an action; none. A **confirmed violation** is any
+  item after the first, or a failed call the agent did not recover from correctly, confirmed by adjudication.
+  Labelers A (a fresh Claude subagent) and B (Codex, or DeepSeek v4-pro under the grant) are model-assisted
+  annotations. Yash labels 5 runs (A-B disagreements first, then random S1/S2), up to 10; only these count as
+  human-validated. Reported: counts per stratum (no population rate from a stratified sample), Cohen's kappa A-B,
+  agreement with Yash, adjudication reasons, each finding marked human-confirmed or model-only. Expansion to about
+  80 runs only if S1+S2 hold at least 2 confirmed violations confirmed by Yash or by both A and B.
+- **H7, phase 1's open v1.0.1 flags against real behaviour (descriptive).** H7a, airline: runs where the agent
+  passes a whole-number float where tau2's published schema says `"type": "integer"` (JSON Schema counts `2.0` as
+  an integer). Each such run is paired with a copy that changes only those values to integers; both are replayed. A
+  **numeric-representation inconsistency** is claimed only if both copies run without tool errors at those calls,
+  give equal tool outputs and equal end states after number canonicalization, and the grader scores them
+  differently. The induced direction (an integer in a real run respelled as `2.0`) is reported apart. Phase 1's
+  "schema-breaking" label (Python type hints) is reported beside it. H7b, banking, G_new reward-1 runs: automated
+  evidence of late verification (`log_verification` after the first customer-data write, or customer data first
+  read or written before the user's messages contain 2 of the 4 verification facts by normalized exact match).
+  Evidence is not a violation; a run counts only if H6 adjudication confirms it.
+- **Rules.** No relation, trigger, threshold or sampling change after held-out data is seen; any deviation is
+  amendment 8, before results. A file with more than 20% incompatible runs is reported, not tuned around. H5 and H7
+  are recomputed independently from per-run records without the module's code. No paid agent runs.
