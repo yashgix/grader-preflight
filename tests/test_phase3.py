@@ -174,10 +174,10 @@ class BankingFileTest(unittest.TestCase):
             raise unittest.SkipTest("no pool task in this environment")
         cls.task = next(task for task in tasks(BANK) if task.id == cls.task_id)
 
-    def build(self):
+    def build(self, task_id=None):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / f"{BANK}.json"
-            with mock.patch.object(phase3, "pool_ids", return_value=[self.task_id]):
+            with mock.patch.object(phase3, "pool_ids", return_value=[task_id or self.task_id]):
                 phase3._banking_file(path)
             return json.loads(path.read_text(encoding="utf-8"))
 
@@ -206,23 +206,41 @@ class BankingFileTest(unittest.TestCase):
             for message in gold["messages"]
         ]
         self.assertEqual(stripped, trimmed["messages"])
-        self.assertTrue(all("id" in message and "error" in message for message in gold["messages"] if message["role"] == "tool"))
-        self.assertTrue(all("id" not in message and "error" not in message for message in trimmed["messages"] if message["role"] == "tool"))
+        self.assertTrue(
+            all("id" in message and "error" in message for message in gold["messages"] if message["role"] == "tool")
+        )
+        self.assertTrue(
+            all(
+                "id" not in message and "error" not in message
+                for message in trimmed["messages"]
+                if message["role"] == "tool"
+            )
+        )
 
     def test_the_late_verification_variant_is_flagged(self):
-        payload = self.build()
-        late = next((simulation for simulation in payload["simulations"] if simulation["trial"] == 4), None)
-        if late is None:
-            self.skipTest("this task has no late-verification variant")
-        run = {"id": late["id"], "task_id": self.task_id, "trial": 4, "domain": BANK, "messages": late["messages"]}
-        self.assertTrue(trajectories.late_verification(self.task, run)["log_after_first_write"])
+        task = next(
+            t for t in tasks(BANK) if t.id in phase3.pool_ids() and f6_late_verification(BANK, t, random.Random(0))
+        )
+        payload = self.build(task.id)
+        late = next(simulation for simulation in payload["simulations"] if simulation["trial"] == 4)
+        run = {"id": late["id"], "task_id": task.id, "trial": 4, "domain": BANK, "messages": late["messages"]}
+        self.assertTrue(trajectories.late_verification(task, run)["log_after_first_write"])
+
+
+def _spelled(calls):
+    return [json.dumps(call.arguments, sort_keys=True) for call in calls]
 
 
 class AirlineFileTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # Compare spellings: Python's 2 == 2.0, so the calls themselves always compare equal.
         cls.task = next(
-            (task for task in tasks(AIRLINE) if phase3.float_calls(AIRLINE, gold_calls(task)) != gold_calls(task)),
+            (
+                task
+                for task in tasks(AIRLINE)
+                if _spelled(phase3.float_calls(AIRLINE, gold_calls(task))) != _spelled(gold_calls(task))
+            ),
             None,
         )
 
@@ -239,7 +257,7 @@ class AirlineFileTest(unittest.TestCase):
         self.assertEqual((gold["trial"], respelled["trial"]), (0, 1))
         self.assertEqual(trajectories.calls(gold["messages"]), gold_calls(self.task))
         self.assertEqual(trajectories.calls(respelled["messages"]), phase3.float_calls(AIRLINE, gold_calls(self.task)))
-        self.assertNotEqual(gold["messages"], respelled["messages"])
+        self.assertNotEqual(json.dumps(gold["messages"]), json.dumps(respelled["messages"]))
         values = [value for call in trajectories.calls(respelled["messages"]) for value in call.arguments.values()]
         self.assertTrue(any(isinstance(value, float) and value.is_integer() for value in values))
 

@@ -122,10 +122,18 @@ class ExperimentTest(unittest.TestCase):
         self.assertEqual(code, 0)
         run.assert_called_once_with(Path(self.out), experiment.DEFAULT_OLD, experiment.DEFAULT_NEW)
 
-    def test_default_is_the_phase2_smoke_run(self):
+    def test_default_is_phase3(self):
+        with mock.patch("preflight.phase3.run_phase3") as phase3:
+            code = experiment.main(["--out", str(self.out), "--processes", "2"])
+        self.assertEqual(code, 0)
+        phase3.assert_called_once_with(Path(self.out).resolve(), experiment.DEFAULT_OLD, experiment.DEFAULT_NEW, 2)
+
+    def test_phase2_runs_the_smoke(self):
         with mock.patch("preflight.phase2.run_smoke", return_value={"episodes": 1}) as smoke:
             code = experiment.main(
                 [
+                    "--phase",
+                    "2",
                     "--out",
                     str(self.out),
                     "--old-python",
@@ -164,7 +172,7 @@ class ExperimentTest(unittest.TestCase):
 
     def test_unknown_phase_is_rejected(self):
         with self.assertRaises(SystemExit):
-            experiment.main(["--out", str(self.out), "--phase", "3"])
+            experiment.main(["--out", str(self.out), "--phase", "4"])
 
     def test_environment_sets_the_offline_flag(self):
         self.assertEqual(experiment._environment()["LITELLM_LOCAL_MODEL_COST_MAP"], "True")
