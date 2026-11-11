@@ -91,22 +91,20 @@ def _domain_of(record) -> str:
     return value if isinstance(value, str) else ""
 
 
+def run_key(record) -> tuple[str, str]:
+    """A run is identified by its source file and its id: ids may repeat across files."""
+    return str(record.get("_stem")), str(record.get("id"))
+
+
 def _join(old_records, new_records) -> list[tuple[dict, dict]]:
-    """Pair old and new records by id; the first new record of an id is the counterpart."""
-    new_by_id = {}
-    for record in sorted(new_records, key=lambda item: (str(item.get("id")), str(item.get("_stem")))):
-        record_id = record.get("id")
-        if record_id is not None:
-            new_by_id.setdefault(str(record_id), record)
-    pairs = []
-    for old in old_records:
-        record_id = old.get("id")
-        if record_id is None:
-            continue
-        new = new_by_id.get(str(record_id))
-        if new is not None:
-            pairs.append((old, new))
-    pairs.sort(key=lambda pair: str(pair[0].get("id")))
+    """Pair old and new records of the same run (same source file, same id)."""
+    new_by_key = {run_key(r): r for r in new_records if r.get("id") is not None}
+    pairs = [
+        (old, new_by_key[run_key(old)])
+        for old in old_records
+        if old.get("id") is not None and run_key(old) in new_by_key
+    ]
+    pairs.sort(key=lambda pair: run_key(pair[0]))
     return pairs
 
 
@@ -146,12 +144,7 @@ def _explained(old, flags) -> bool:
     tables = {str(table) for table in diff} if isinstance(diff, list) else set()
     if old.get("p1") is True and task_id in flags["P1"] and diff == ["agent_discoverable_tools"]:
         return True
-    return (
-        old.get("p3") is True
-        and task_id in flags["P3"]
-        and bool(tables)
-        and not (tables - P3_TABLES)
-    )
+    return old.get("p3") is True and task_id in flags["P3"] and bool(tables) and not (tables - P3_TABLES)
 
 
 def _bootstrap_interval(events, flags) -> list[float] | None:
@@ -190,15 +183,19 @@ def _baseline(pairs, positive) -> dict:
 
     positive_rate = rate(pos)
     negative_rate = rate(neg)
+    events_positive = sum(1 for old, new in pos if _event(old, new))
+    events_negative = sum(1 for old, new in neg if _event(old, new))
     enrichment = None
     if positive_rate is not None and negative_rate not in (None, 0.0):
         enrichment = positive_rate / negative_rate
     return {
         "positive": len(pos),
         "negative": len(neg),
-        "events_positive": sum(1 for old, new in pos if _event(old, new)),
-        "events_negative": sum(1 for old, new in neg if _event(old, new)),
-        "recall": positive_rate,
+        "events_positive": events_positive,
+        "events_negative": events_negative,
+        "recall": events_positive / (events_positive + events_negative) if events_positive + events_negative else None,
+        "rate_positive": positive_rate,
+        "rate_negative": negative_rate,
         "enrichment": enrichment,
     }
 
@@ -277,9 +274,7 @@ def _h5_document(pairs, flags) -> dict:
         groups = {}
         for pair in pairs:
             groups.setdefault(str(pair[0].get(key) or "unknown"), []).append(pair)
-        document[field] = {
-            name: _h5_summary(group, flags) for name, group in sorted(groups.items())
-        }
+        document[field] = {name: _h5_summary(group, flags) for name, group in sorted(groups.items())}
     return document
 
 
@@ -294,9 +289,7 @@ def _replay_class_counts(records) -> dict:
 
 def _h7_document(pairs) -> dict:
     airline_new = [
-        new
-        for old, new in pairs
-        if _domain_of(new) == AIRLINE and new.get("task_matches") is True and _graded(new)
+        new for old, new in pairs if _domain_of(new) == AIRLINE and new.get("task_matches") is True and _graded(new)
     ]
     banking_reward_one = [
         new
@@ -307,9 +300,7 @@ def _h7_document(pairs) -> dict:
         and float(new.get("reward")) == 1.0
     ]
     control_events = sum(
-        1
-        for old, new in pairs
-        if _domain_of(new) == AIRLINE and _graded(old) and _graded(new) and _event(old, new)
+        1 for old, new in pairs if _domain_of(new) == AIRLINE and _graded(old) and _graded(new) and _event(old, new)
     )
     return {
         "airline": {
@@ -318,8 +309,7 @@ def _h7_document(pairs) -> dict:
             "inconsistencies": sum(
                 1
                 for record in airline_new
-                if isinstance(record.get("numeric_pair"), dict)
-                and record["numeric_pair"].get("inconsistency") is True
+                if isinstance(record.get("numeric_pair"), dict) and record["numeric_pair"].get("inconsistency") is True
             ),
             "control_events": control_events,
         },
@@ -533,10 +523,7 @@ def _process_flag(domain, task, run, record) -> bool:
         return True
     if task is None or not domain:
         return False
-    try:
-        return _failed_write(domain, task, run) or _write_not_in_gold(domain, task, run)
-    except Exception:
-        return False
+    return _failed_write(domain, task, run) or _write_not_in_gold(domain, task, run)
 
 
 def _raw_info(path) -> dict:
@@ -600,24 +587,34 @@ def _instructions(task) -> str:
     return ""
 
 
-def _load_source_files(paths) -> dict[str, dict]:
+def _local_tasks(domain) -> dict:
+    from tau2.registry import registry
+
+    return {t.id: t for t in registry.get_tasks_loader(domain)()}
+
+
+def _load_source_files(paths) -> dict[tuple[str, str], dict]:
+    """Runs of the published files by (file stem, id): the embedded task for the packet, the local task (when
+    identical) for the process checks."""
     from preflight import trajectories
 
     entries = {}
+    local = {}
     for path in paths:
-        try:
-            loaded = trajectories.load(path)
-        except Exception:
-            continue
+        loaded = trajectories.load(path)
         policy = _find_policy(_raw_info(path)) or ""
         domain = loaded.get("domain")
+        if domain not in local:
+            local[domain] = _local_tasks(domain)
         for run in loaded.get("runs") or []:
-            run_id = str(run.get("id"))
-            if run_id in entries:
-                continue
-            entries[run_id] = {
+            embedded = loaded.get("tasks", {}).get(str(run.get("task_id")))
+            task = local[domain].get(str(run.get("task_id")))
+            entries[(_stem(path), str(run.get("id")))] = {
                 "run": run,
-                "task": loaded.get("tasks", {}).get(str(run.get("task_id"))),
+                "task": embedded,
+                "local_task": task
+                if embedded is not None and task is not None and trajectories.task_matches(embedded, task)
+                else None,
                 "domain": domain,
                 "policy": policy,
             }
@@ -634,21 +631,21 @@ def _packet(entry) -> dict:
     }
 
 
-def _strata(pairs, pool, entries) -> dict[str, set[str]]:
+def _strata(pairs, pool, entries) -> dict[str, set[tuple[str, str]]]:
     s1, s2, s3, s4 = set(), set(), set(), set()
     for old, new in pairs:
         if _domain_of(new) != BANK or new.get("task_matches") is not True or not _graded(new):
             continue
-        run_id = str(new.get("id"))
-        if run_id == "None":
+        if new.get("id") is None:
             continue
+        run_id = run_key(new)
         reward = float(new["reward"])
         if _h5_eligible(old, new, pool) and _event(old, new):
             s4.add(run_id)
         if reward == 1.0:
             entry = entries.get(run_id)
             flagged = (
-                _process_flag(entry.get("domain"), entry.get("task"), entry.get("run"), new)
+                _process_flag(entry.get("domain"), entry.get("local_task"), entry.get("run"), new)
                 if entry
                 else _late_true(new)
             )
@@ -671,7 +668,7 @@ def sample(old_dir, new_dir, flags_path, pool_path, files, out_path):
     selected = []
     shortfalls = {}
     for name, size in SAMPLE_SIZES:
-        ids = sorted(str(item) for item in strata.get(name, set()))
+        ids = sorted(strata.get(name, set()))
         if len(ids) <= size:
             chosen = ids
         else:
@@ -694,7 +691,7 @@ def sample(old_dir, new_dir, flags_path, pool_path, files, out_path):
         number = len(key) + 1
         packet_name = f"{number:02d}.json"
         _write_json(packets / packet_name, _packet(entry))
-        key.append({"packet": number, "run_id": run_id, "stratum": stratum})
+        key.append({"packet": number, "file": run_id[0], "run_id": run_id[1], "stratum": stratum})
     _write_json(out_path / "key.json", key)
     if shortfalls:
         _write_json(out_path / "shortfalls.json", shortfalls)

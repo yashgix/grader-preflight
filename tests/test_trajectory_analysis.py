@@ -233,25 +233,21 @@ class AnalyzeTest(unittest.TestCase):
 
 class StrataTest(unittest.TestCase):
     def _pairs(self):
-        return [
-            (_record("s1", reward=1.0), _record("s1", reward=1.0)),
-            (_record("s2", reward=1.0), _record("s2", reward=1.0)),
-            (_record("s3", reward=0.0), _record("s3", reward=0.0)),
-            (_record("s4", reward=0.0), _record("s4", reward=1.0)),
-        ]
+        rewards = {"s1": (1.0, 1.0), "s2": (1.0, 1.0), "s3": (0.0, 0.0), "s4": (0.0, 1.0)}
+        return [(_record(i, reward=o, _stem="f"), _record(i, reward=n, _stem="f")) for i, (o, n) in rewards.items()]
 
     def test_strata_use_rewards_and_late_verification(self):
         pairs = self._pairs()
         pairs[0][1]["late_verification"] = {"log_after_first_write": True, "access_before_facts": None}
         entries = {
-            run_id: {"domain": "", "task": {"id": "task_001"}, "run": {"id": run_id, "messages": []}}
+            ("f", run_id): {"domain": "", "task": {"id": "task_001"}, "run": {"id": run_id, "messages": []}}
             for run_id in ("s1", "s2", "s3", "s4")
         }
         strata = trajectory_analysis._strata(pairs, {"task_001"}, entries)
-        self.assertEqual(strata["S1"], {"s1"})
-        self.assertEqual(strata["S2"], {"s2"})
-        self.assertEqual(strata["S3"], {"s3"})
-        self.assertEqual(strata["S4"], {"s4"})
+        self.assertEqual(strata["S1"], {("f", "s1")})
+        self.assertEqual(strata["S2"], {("f", "s2")})
+        self.assertEqual(strata["S3"], {("f", "s3")})
+        self.assertEqual(strata["S4"], {("f", "s4")})
 
 
 class SampleTest(unittest.TestCase):
@@ -265,7 +261,9 @@ class SampleTest(unittest.TestCase):
                 _record("s4", reward=0.0),
             ]
             new_records = [
-                _record("s1", reward=1.0, late_verification={"log_after_first_write": True, "access_before_facts": None}),
+                _record(
+                    "s1", reward=1.0, late_verification={"log_after_first_write": True, "access_before_facts": None}
+                ),
                 _record("s2", reward=1.0),
                 _record("s3", reward=0.0),
                 _record("s4", reward=1.0),
@@ -275,7 +273,7 @@ class SampleTest(unittest.TestCase):
             flags = _write_json(root / "flags.json", {"P1": [], "P3": []})
             pool = _write_json(root / "pool.json", {"tasks": ["task_001"]})
             entries = {
-                run_id: {
+                ("banking", run_id): {
                     "domain": "",
                     "policy": "",
                     "task": {"id": "task_001"},
@@ -297,10 +295,10 @@ class SampleTest(unittest.TestCase):
                 text = path.read_text(encoding="utf-8").lower()
                 self.assertNotIn("reward", text)
                 self.assertNotIn("stratum", text)
-                for run_id in entries:
+                for _, run_id in entries:
                     self.assertNotIn(run_id, text)
             key_data = _read_json(out / "key.json")
-            self.assertEqual({item["run_id"] for item in key_data}, set(entries))
+            self.assertEqual({(item["file"], item["run_id"]) for item in key_data}, set(entries))
 
 
 if __name__ == "__main__":
