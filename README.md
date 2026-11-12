@@ -25,13 +25,15 @@ pre-registered hypotheses held; the other four are reported as not held.
 | 2 | Does such a bug change what a learning agent does? | Not as pre-registered: H3 and H4 failed. Exploratory: greedy policies trained on the buggy grader made 1.8 fewer checks after finishing the task (95% interval 0.8–2.7); 3 of 10 buggy-grader seeds collapsed (true success 19–47%), so mean true success fell 21 points (interval 0.4–43). |
 | 3 | Does it explain real grading errors in published frontier-agent runs? | Not fully: H5 failed. The old grader would wrongly fail 118 runs by GPT-5.5, Claude Opus 4.7, Claude Opus 5 and Qwen3.8-max (counterfactual: the runs were made on the fixed version); phase 1's flags cover 87 (recall 0.74, 95% interval 0.48–0.94), short of the pre-registered 0.90. All 31 misses are the same bug, on 6 tasks where none of phase 1's five sampled extra reads used the tool these agents read. |
 
-**New finding: the fixed grader can't see interest-discrepancy reports.** The report tool writes to a database table
-that doesn't exist and reports success anyway, so the grader only sees that the tool was used: not what the reports
-say, how many were filed, or for which account. A run whose reports carry wrong interest rates, or that files one of
-two required reports, still scores full marks. This affects 5 banking tasks; in the published runs, 3 of the 41
-full-score runs on them filed wrong numbers (one then filed correct reports as well). It reproduces on both versions
-tested, and v2.0.0's tool still writes to the undefined table (from reading its source; not run). I found no report
-of it in τ²-bench's issues or changelog (searched 11 Nov 2026).
+**Grader blind spot, measured: the fixed grader can't check interest-discrepancy reports.** The report tool writes to
+a database table that τ²-bench never declares, and reports success anyway. That missing table was documented in June
+2026 by the [Inspect Evals port of τ²-bench](https://github.com/UKGovernmentBEIS/inspect_evals/pull/1731), which
+adds the table and notes that scoring is unaffected. This project shows that in τ²-bench's own grader it does affect
+scoring: the grader only sees that the tool was used, not what the reports say, how many were filed or for which
+account, so a run with wrong interest rates, or with one of two required reports, still scores full marks. It affects
+5 banking tasks; in the published runs, 3 of the 41 full-score runs on them filed wrong rates (one then filed correct
+reports as well), each checked against the task's written rules. It reproduces on both versions tested, and v2.0.0's
+tool still writes to the undeclared table (from reading its source; not run).
 
 ```console
 $ .tau2/v1.0.1/venv/bin/python examples/report_blind_spot.py
@@ -41,7 +43,8 @@ same run, second report left out:  reward 1.0
 same run, both reports left out:   reward 0.0
 ```
 
-The phase 1 defects are Sierra's, fixed in their pull requests #329 and #397; everything else was found here. Phase
+The phase 1 defects are Sierra's, fixed in their pull requests #329 and #397, and the missing report table was
+documented by Inspect Evals; the experiments, the scoring test and the measurements on real runs are this project's. Phase
 3's check for hidden mistakes in conversations used two language-model annotators, with disagreements settled by a
 third model pass, and is model-assisted, not human-validated; the blind-spot evidence above does not depend on it.
 
@@ -88,8 +91,10 @@ The conversation annotation is small (24 runs) and model-assisted.
 
 ## About
 
-An independent research project by Yash Gupta, not affiliated with Sierra. τ²-bench is MIT-licensed and is installed
-from its official repository, not copied here. The published leaderboard runs are used for aggregate analysis only and
-are not redistributed: their licence is not stated (τ²-bench issue #612).
+An independent research project by Yash Gupta, not affiliated with Sierra or the Inspect Evals project.
 
-Shared to show the work; not licensed for reuse.
+The original code in this repository is released under the [MIT licence](LICENSE). It does not cover third-party
+material: τ²-bench (MIT, © Sierra) is installed from its official repository, not copied here, and τ²-bench's published
+leaderboard runs are not included or redistributed, because their licence is not stated (τ²-bench issue #612).
+`results/` holds only aggregate counts and, for the three blind-spot examples, the agent, task, trial and the report
+values that differ from the task's rules.

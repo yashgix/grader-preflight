@@ -1,6 +1,7 @@
 [project]
 name = "grader-preflight"
 version = "0.1.0"
+license = "MIT"
 description = "LLM-free preflight for graders of stateful tool environments"
 requires-python = ">=3.12,<3.14"
 

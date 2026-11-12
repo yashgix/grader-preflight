@@ -205,7 +205,7 @@ footer a { color: var(--muted); }
         <span class="chip"><b>3</b> pre-registered phases</span>
         <span class="chip"><b>2,203</b> test cases per grader version</span>
         <span class="chip"><b>118</b> real agent runs the old grader would misgrade</span>
-        <span class="chip"><b>1</b> new grader blind spot</span>
+        <span class="chip"><b>1</b> grader blind spot measured on real runs</span>
       </div>
       <div class="actions">
         <a class="btn primary" href="https://github.com/yashgix/grader-preflight">View the code on GitHub</a>
@@ -257,7 +257,7 @@ footer a { color: var(--muted); }
         <div class="card"><span class="origin theirs">Bugs published by Sierra</span><h3>1 · It finds known grading bugs</h3><p>On the grader before the fix, an extra lookup was wrongly failed on <b>43 of 62</b> comparable banking tasks and a respelled number on <b>25 of 33</b>; on the fixed grader, on <b>0</b> and <b>0</b>. Controls in the unchanged domains: 0 mismatches.</p></div>
         <div class="card"><span class="origin ours">Found here</span><h3>2 · A grader bug changes what is learned</h3><p>Policies trained on the buggy grader learned to stop right after the task; on the fixed one they kept checking. 7 of 10 buggy-grader seeds converged against 10 of 10, so mean true success fell 21 points. This is exploratory: both pre-registered hypotheses for this phase failed.</p></div>
         <div class="card"><span class="origin ours">Found here</span><h3>3 · Real frontier-agent runs</h3><p>On 4 public leaderboard files the old grader would wrongly fail <b>118</b> runs (counterfactual: they ran on the fixed version). Phase 1's flags cover 87 (74%), short of the pre-registered 90%, so H5 failed: all 31 misses are the same bug, on 6 tasks where none of phase 1's five sampled extra reads used the tool these agents read.</p></div>
-        <div class="card"><span class="origin ours">New finding</span><h3>4 · A blind spot in the fixed grader</h3><p>Interest-discrepancy reports are silently discarded, so the grader sees that the report tool was used, never what the reports say or how many were filed. It affects 5 banking tasks; 3 of 41 real full-score runs on them filed wrong numbers.</p></div>
+        <div class="card"><span class="origin ours">Measured here</span><h3>4 · A blind spot in the fixed grader</h3><p>Interest-discrepancy reports go to a table τ²-bench never declares (documented by Inspect Evals in June 2026), so the grader sees that the report tool was used, never what the reports say or how many were filed. It affects 5 banking tasks; 3 of 41 real full-score runs on them filed wrong numbers.</p></div>
       </div>
     </div>
   </section>
@@ -265,9 +265,9 @@ footer a { color: var(--muted); }
   <section class="block band wrap">
     <div class="wide stack" style="gap:1.4rem">
       <div class="col stack" style="margin-inline:0">
-        <div class="eyebrow">The new finding</div>
+        <div class="eyebrow">The blind spot</div>
         <h2>A report with wrong numbers still scores full marks</h2>
-        <p class="lead">In task 096 the customer's savings interest was underpaid. The agent should credit both accounts and file a discrepancy report for each, with the correct and the applied interest rate. The report tool answers "Submitted Successfully", but it writes to a database table that doesn't exist, and the helper that writes silently returns instead of failing. The report is lost. The grader only sees, through a call log, that the report tool was used: filing one of the two reports, or reports with wrong rates, still scores full marks.</p>
+        <p class="lead">In task 096 the customer's savings interest was underpaid. The agent should credit both accounts and file a discrepancy report for each, with the correct and the applied interest rate. The report tool answers "Submitted Successfully", but it writes to a database table that doesn't exist, and the helper that writes silently returns instead of failing. The report is lost. The missing table was documented in June 2026 by the Inspect Evals port of τ²-bench, which adds it and notes that scoring is unaffected; in τ²-bench's own grader it is not. The grader only sees, through a call log, that the report tool was used: filing one of the two reports, or reports with wrong rates, still scores full marks.</p>
       </div>
       <div class="stack" style="gap:1.4rem">
         <div class="stack" style="gap:0.6rem">
@@ -287,7 +287,7 @@ same run, both reports left out:   reward 0.0</code></pre>
               <tbody><tr><td>GPT-5.5</td><td>093</td><td>1</td><td class="num">1 → 1</td><td>expected APY 4.25 (correct 4.275)</td></tr><tr><td>Claude Opus 5</td><td>096</td><td>3</td><td class="num">2 → 4</td><td>expected APY 3 (correct 3.25); expected APY 6.8 (correct 6.85)</td></tr><tr><td>Qwen3.8-max</td><td>096</td><td>0</td><td class="num">2 → 2</td><td>actual APY 2.4 (correct 2.55); expected APY 6.9 (correct 6.85)</td></tr></tbody>
             </table>
           </div>
-          <p class="small muted">All 41 held-out runs that scored 1 on the 5 affected tasks, checked directly against the gold reports; all three scored full marks. Claude Opus 5 filed two wrong reports, then the two correct ones as well.</p>
+          <p class="small muted">All 41 held-out runs that scored 1 on the 5 affected tasks, checked against the gold reports and against the rates the task's own rules give (base rate plus the highest checking boost and the highest card bonus; actual rate from the credit and balance); all three scored full marks. Claude Opus 5 filed two wrong reports, then the two correct ones as well.</p>
         </div>
       </div>
     </div>
@@ -400,7 +400,8 @@ same run, both reports left out:   reward 0.0</code></pre>
         <li><code>submit_interest_discrepancy_report_7294</code> calls <code>add_to_db("interest_discrepancy_reports", …)</code>; the banking database model defines no such table, and <code>add_to_db</code> returns <code>False</code> for an unknown table. The tool ignores that and returns success. It is the only tool in the domain that writes to an undefined table.</li>
         <li>The grader compares database hashes, so the report's contents never reach it; the discoverable-tool call log records the tool name, which is why leaving the report out fails.</li>
         <li>Scope: tasks 093, 094, 095, 096, 097 file reports in their gold runs. In the held-out runs, 3 of 41 full-score runs on them filed reports whose numbers differ from gold.</li>
-        <li>Filing only one of task 096's two reports, or one of task 097's four, also scores full marks: the call log records the tool name once. Phase 1 counted the repeated report calls in tasks 096 and 097 as "no-effect writes" but had no relation that varied their arguments. Not found in τ²-bench's issues or changelog (searched 11 Nov 2026); issue #753 documents the related call-log behaviour.</li>
+        <li>Every wrong value in the table is wrong under the task's written rules, independently of the gold run; task 096's Bluest account is below its stated minimum balance, an ambiguity in the task, but none of the flagged values matches either reading.</li>
+        <li>Filing only one of task 096's two reports, or one of task 097's four, also scores full marks: the call log records the tool name once. Phase 1 counted the repeated report calls in tasks 096 and 097 as "no-effect writes" but had no relation that varied their arguments. The missing table itself was documented in June 2026 by the <a href="https://github.com/UKGovernmentBEIS/inspect_evals/pull/1731">Inspect Evals port</a>, which declares it and notes scoring is unaffected in that port; τ²-bench's own issues and changelog don't mention it (searched 11 Nov 2026), and issue #753 documents related call-log behaviour.</li>
       </ul>
     </div>
   </section>
@@ -424,13 +425,14 @@ same run, both reports left out:   reward 0.0</code></pre>
       <h2>Related work</h2>
       <ul class="list">
         <li>Sierra, <a href="https://github.com/sierra-research/tau2-bench/releases/tag/v1.0.1">τ²-bench v1.0.1</a>: the banking grading fixes and their effect on the leaderboard (the bugs phase 1 tests for).</li>
+        <li><a href="https://github.com/UKGovernmentBEIS/inspect_evals/pull/1731">Inspect Evals τ²-bench banking port</a> (UKGovernmentBEIS/inspect_evals) (June 2026): documents the undeclared report table and declares it in its port.</li>
         <li><a href="https://github.com/sierra-research/tau2-bench/issues/753">τ²-bench issue #753</a>: an audit of banking task data and scoring, including call-log behaviour related to the blind spot.</li>
         <li>Ray, <a href="https://arxiv.org/abs/2606.01066">Fuzzing RLVR verifiers</a> (2026): planted verifier bugs found by a small RL search, on single-turn tasks.</li>
         <li>Xin, <a href="https://arxiv.org/abs/2609.01354">Where the verifier fails</a> (2026): metamorphic tests for math answer verifiers.</li>
         <li>Cao et al., <a href="https://arxiv.org/abs/2603.03116">procedure-aware evaluation</a> (2026), and <a href="https://github.com/chrisbartoloburlo/llmcontract-tau2">llmcontract-tau2</a>: process violations behind passing τ-bench runs in the airline and retail domains.</li>
         <li>Bhat et al., <a href="https://arxiv.org/abs/2607.02577">a validity audit of tool-calling evaluation</a> (2026): expert-labelled grading errors across benchmarks.</li>
       </ul>
-      <p class="small muted">What this project adds: a model-free grader test checked against a benchmark's real before-and-after fixes, its effect on learned behaviour, its coverage measured on held-out frontier-agent runs, and a previously unreported blind spot.</p>
+      <p class="small muted">What this project adds: a model-free grader test checked against a benchmark's real before-and-after fixes, its effect on learned behaviour, its coverage measured on held-out frontier-agent runs, and the grading effect of a documented environment defect, with a scoring test and real-run examples.</p>
     </div>
   </section>
 
