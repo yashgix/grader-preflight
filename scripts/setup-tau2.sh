@@ -10,7 +10,8 @@ LOCK_SHA=62d3a8c4807b89e85703b3c03f2c21048a2da9736ca83d9af6f61adc74ac5314
 
 build() {
   name=$1 commit=$2 dir="$ROOT/.tau2/$1"
-  if [ -x "$dir/venv/bin/python" ]; then echo "$name: already built"; return; fi
+  if [ -f "$dir/venv/.complete" ]; then echo "$name: already built"; return; fi
+  rm -rf "$dir/venv"
   mkdir -p "$dir"
   [ -d "$dir/src/.git" ] || git clone --quiet --filter=blob:none "$REPO" "$dir/src"
   git -C "$dir/src" checkout --quiet "$commit"
@@ -24,7 +25,9 @@ build() {
     "$name" "$commit" "$REPO" "$LOCK_SHA" "$(date -u '+%Y-%m-%d %H:%M:%S')" > "$dir/venv/SOURCE.txt"
   site=$("$dir/venv/bin/python" -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
   echo "$dir/src/src" > "$site/tau2-src.pth"
-  "$dir/venv/bin/python" -c "import tau2" && echo "$name: ready ($dir/venv/bin/python)"
+  "$dir/venv/bin/python" -c "import tau2"
+  touch "$dir/venv/.complete"  # written last: a failed build is rebuilt on the next run
+  echo "$name: ready ($dir/venv/bin/python)"
 }
 
 build pre-v1.0.1 b51a6d69e26f0e94a9173e2e80fe8735a8dff650

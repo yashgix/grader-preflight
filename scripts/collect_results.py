@@ -4,8 +4,9 @@ Run with the v1.0.1 interpreter (it re-reads published trajectories and phase 2 
     .tau2/v1.0.1/venv/bin/python scripts/collect_results.py --phase1 P1 --phase2 P2 --phase3 P3 --trajectories T
 
 P1: phase 1 run folder (metrics.json); P2: phase 2 full-run folder (runs/, split.json); P3: phase 3 analysis folder
-(old/, new/, analysis/, h6-labels/); T: the held-out published trajectory files. Only counts and identifiers of
-public submissions are written, never trajectory contents.
+(old/, new/, analysis/, h6-sample/, h6-labels/); T: the held-out published trajectory files. Written: counts,
+identifiers of public submissions, tasks and trials, and for the report blind spot the few report values that differ
+from gold. No conversation, tool output or other trajectory content.
 """
 
 import argparse
@@ -120,14 +121,21 @@ def blind_spot(records_dir, trajectory_dir):
                 continue
             rows[run["task_id"]] += 1
             gold, filed = reports(gold_calls(task)), reports(trajectories.calls(run["messages"]))
-            if sorted(map(json.dumps, gold)) != sorted(map(json.dumps, filed)):
+            if sorted(json.dumps(r, sort_keys=True) for r in gold) != sorted(
+                json.dumps(r, sort_keys=True) for r in filed
+            ):
                 gold_by_account = {r["account_id"]: r for r in gold}
                 differences = [
-                    {"account": r["account_id"], "field": k, "filed": v, "gold": gold_by_account[r["account_id"]][k]}
+                    {
+                        "account": r["account_id"],
+                        "field": k,
+                        "filed": v,
+                        "gold": gold_by_account.get(r["account_id"], {}).get(k),
+                    }
                     for r in filed
-                    if r not in gold and r["account_id"] in gold_by_account
+                    if r not in gold
                     for k, v in r.items()
-                    if v != gold_by_account[r["account_id"]].get(k)
+                    if v != gold_by_account.get(r["account_id"], {}).get(k)
                 ]
                 differing.append(
                     {

@@ -1,7 +1,8 @@
 """Fill docs/template.html with values and charts computed from results/*.json, writing docs/index.html.
 
-Every number on the page comes from the results files, so the page can't drift from the data. Placeholders look like
-{{name}}; an unknown or unused name is an error.
+Every measured number on the page comes from the results files, so the page can't drift from the data (fixed design
+facts such as the seed count are written in the template). Placeholders look like {{name}}; an unknown or unused name is
+an error.
 
     python3 scripts/build_site.py
 """
@@ -117,8 +118,8 @@ def events_chart(p3):
 def values():
     p1, p2, p3 = load("phase1"), load("phase2"), load("phase3")
     m2, h5, h7, h6, spot = p2["metrics"], p3["h5"], p3["h7"], p3["h6"], p3["blind_spot"]
-    shares = [f["old"]["incompatible_share"] for f in p3["files"].values() if f["old"]["incompatible_share"]]
     banking_files = [s for s in p3["files"] if s.endswith("banking")]
+    shares = [p3["files"][s]["old"]["incompatible_share"] for s in banking_files]
     faithful = [p3["regrade_equals_recorded"][s] for s in banking_files]
     reads = p2["post_completion_reads_old_minus_new"]
     out = {

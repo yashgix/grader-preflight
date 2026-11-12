@@ -1,5 +1,5 @@
-OLD ?= .tau2/pre-v1.0.1/venv/bin/python
-NEW ?= .tau2/v1.0.1/venv/bin/python
+OLD ?= $(or $(TAU2_OLD_PYTHON),.tau2/pre-v1.0.1/venv/bin/python)
+NEW ?= $(or $(TAU2_NEW_PYTHON),.tau2/v1.0.1/venv/bin/python)
 export TAU2_OLD_PYTHON := $(abspath $(OLD))
 export TAU2_NEW_PYTHON := $(abspath $(NEW))
 export LITELLM_LOCAL_MODEL_COST_MAP := True
@@ -8,7 +8,7 @@ setup:
 	./scripts/setup-tau2.sh
 
 lint:
-	ruff check . && ruff format --check .
+	uvx ruff@0.17.4 check . && uvx ruff@0.17.4 format --check .
 
 test:
 	$(OLD) -m unittest discover -s tests -t .

@@ -308,20 +308,24 @@ extra reads, order, altered writes — is.
 
 ### Published runs
 
-The leaderboard trajectory files stay outside this repository and are never redistributed; paths are arguments and only
-aggregate counts are written (amendment 7). The held-out files and the rule that chose them are in amendment 7. With
-`OLD` and `NEW` the two interpreters and `PUBLISHED` the downloaded files:
+The leaderboard trajectory files stay outside this repository and are never redistributed; paths are arguments, and
+only counts, identifiers and the few report values that differ from gold are written (amendment 7 names the held-out
+files and the rule that chose them). With `OLD` and `NEW` the two interpreters, `PUBLISHED` the downloaded files and
+`PHASE1` a phase 1 run folder, run from an empty working folder:
 
 ```sh
-$OLD -m preflight.trajectories regrade PUBLISHED/*.json --out regrade/old     # replay, regrade, triggers per run
-$NEW -m preflight.trajectories regrade PUBLISHED/*.json --out regrade/new
-$OLD -m preflight.trajectories flags PHASE1/results/old/banking_knowledge.json --out flags.json   # phase 1's flags
-$NEW -m preflight.trajectories analyze --old regrade/old --new regrade/new --flags flags.json \
-  --pool data/banking_pool.json --out analysis                                   # H5, H7, runs.csv, report
-$NEW -m preflight.trajectories sample --old regrade/old --new regrade/new --flags flags.json \
-  --pool data/banking_pool.json --files PUBLISHED/*_banking.json --out h6        # H6's blinded 24-run sample
-$NEW scripts/collect_results.py --phase1 PHASE1 --phase2 PHASE2 --phase3 . --trajectories PUBLISHED
+$OLD -m preflight.trajectories regrade PUBLISHED/*.json --out old        # replay, regrade and triggers per run
+$NEW -m preflight.trajectories regrade PUBLISHED/*.json --out new
+$OLD -m preflight.trajectories flags PHASE1/results/old/banking_knowledge.json --out flags.json
+$NEW -m preflight.trajectories analyze --old old --new new --flags flags.json \
+  --pool data/banking_pool.json --out analysis                           # H5, H7, runs.csv, report
+$NEW -m preflight.trajectories sample --old old --new new --flags flags.json \
+  --pool data/banking_pool.json --files PUBLISHED/*_banking.json --out h6-sample   # H6's blinded sample
 ```
+
+H6's labels (`h6-labels/`: two model annotators' answers, their agreement and the adjudication) were produced outside
+this code, so `scripts/collect_results.py --phase3 .` needs that folder too; the rest of `results/phase3.json` comes
+from the commands above.
 
 ### The synthetic experiment (`preflight/phase3.py`)
 
@@ -354,8 +358,7 @@ $NEW scripts/collect_results.py --phase1 PHASE1 --phase2 PHASE2 --phase3 . --tra
   are not computed by `--phase 2`.
 - Phase 3's synthetic experiment (`experiment.py --phase 3`) shows that the pipeline works, not what published agents
   did; the published-run results come from the same commands on the leaderboard files, which are not in this
-  repository. `access_before_facts` is `None` on synthetic runs because they carry no user message with text. A run's end state is compared as two DB hashes and a list of
-  top-level table names. H6's labels come from outside this code (two
-  independent language-model annotators, then adjudication; amendments 8 and 9), and no population rate can be read off
-  a stratified sample. A file whose incompatible share is high is
-  reported, not tuned around.
+  repository. `access_before_facts` is `None` on synthetic runs because they carry no user message with text. A run's
+  end state is compared as two DB hashes and a list of top-level table names. H6's labels come from outside this code
+  (two independent language-model annotators, then adjudication; amendments 8 and 9), and no population rate can be
+  read off a stratified sample. A file whose incompatible share is high is reported, not tuned around.

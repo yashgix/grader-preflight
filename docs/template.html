@@ -251,13 +251,13 @@ footer a { color: var(--muted); }
       <div class="col stack" style="margin-inline:0">
         <div class="eyebrow">Results</div>
         <h2>What each phase showed</h2>
-        <p class="lead">Every phase was pre-registered (hypotheses, thresholds and seeds written down and committed before the data was run). Two of the four main hypotheses failed and are reported as failed.</p>
+        <p class="lead">Every phase was pre-registered (hypotheses, thresholds and seeds written down and committed before the data was run). One of the five pre-registered hypotheses held (H1); H2 to H5 did not, and are reported as not held.</p>
       </div>
       <div class="cards">
         <div class="card"><span class="origin theirs">Bugs published by Sierra</span><h3>1 · It finds known grading bugs</h3><p>On the grader before the fix, an extra lookup was wrongly failed on <b>{{p1_p1_old}} of {{p1_comparable}}</b> comparable banking tasks and a respelled number on <b>{{p1_p3_old}} of {{p1_p3_tasks}}</b>; on the fixed grader, on <b>{{p1_p1_new}}</b> and <b>{{p1_p3_new}}</b>. Controls in the unchanged domains: {{p1_control}} mismatches.</p></div>
-        <div class="card"><span class="origin ours">Found here</span><h3>2 · A grader bug changes what is learned</h3><p>Policies trained on the buggy grader learned to stop right after the task; on the fixed one they kept checking. {{p2_converged_old}} of 10 buggy-grader seeds converged against {{p2_converged_new}} of 10, and true success fell {{p2_true_points}} points. The pre-registered lookup measure did not reach significance.</p></div>
-        <div class="card"><span class="origin ours">Found here</span><h3>3 · Real frontier-agent runs</h3><p>On {{p3_banking_files}} public leaderboard files the old grader would wrongly fail <b>{{p3_events}}</b> runs. Phase 1's flags cover {{p3_explained}} ({{p3_recall_pct}}), short of the pre-registered 90%: all {{p3_unexplained}} misses are the same bug on {{p3_missed_task_count}} tasks phase 1's sampling skipped.</p></div>
-        <div class="card"><span class="origin ours">New finding</span><h3>4 · A blind spot in the fixed grader</h3><p>Interest-discrepancy reports are silently discarded, so the grader can check that a report was filed but never what it says. It affects {{spot_tasks}} banking tasks; {{spot_differ}} of {{spot_reward1}} real full-score runs on them filed wrong numbers.</p></div>
+        <div class="card"><span class="origin ours">Found here</span><h3>2 · A grader bug changes what is learned</h3><p>Policies trained on the buggy grader learned to stop right after the task; on the fixed one they kept checking. {{p2_converged_old}} of 10 buggy-grader seeds converged against {{p2_converged_new}} of 10, so mean true success fell {{p2_true_points}} points. This is exploratory: both pre-registered hypotheses for this phase failed.</p></div>
+        <div class="card"><span class="origin ours">Found here</span><h3>3 · Real frontier-agent runs</h3><p>On {{p3_banking_files}} public leaderboard files the old grader would wrongly fail <b>{{p3_events}}</b> runs (counterfactual: they ran on the fixed version). Phase 1's flags cover {{p3_explained}} ({{p3_recall_pct}}), short of the pre-registered 90%, so H5 failed: all {{p3_unexplained}} misses are the same bug, on {{p3_missed_task_count}} tasks where none of phase 1's five sampled extra reads used the tool these agents read.</p></div>
+        <div class="card"><span class="origin ours">New finding</span><h3>4 · A blind spot in the fixed grader</h3><p>Interest-discrepancy reports are silently discarded, so the grader sees that the report tool was used, never what the reports say or how many were filed. It affects {{spot_tasks}} banking tasks; {{spot_differ}} of {{spot_reward1}} real full-score runs on them filed wrong numbers.</p></div>
       </div>
     </div>
   </section>
@@ -267,7 +267,7 @@ footer a { color: var(--muted); }
       <div class="col stack" style="margin-inline:0">
         <div class="eyebrow">The new finding</div>
         <h2>A report with wrong numbers still scores full marks</h2>
-        <p class="lead">In task 096 the customer's savings interest was underpaid. The agent should credit both accounts and file a discrepancy report for each, with the correct and the applied interest rate. The report tool answers "Submitted Successfully", but it writes to a database table that doesn't exist, and the helper that writes silently returns instead of failing. The report is lost. The grader only sees, through a call log, that the report tool was used.</p>
+        <p class="lead">In task 096 the customer's savings interest was underpaid. The agent should credit both accounts and file a discrepancy report for each, with the correct and the applied interest rate. The report tool answers "Submitted Successfully", but it writes to a database table that doesn't exist, and the helper that writes silently returns instead of failing. The report is lost. The grader only sees, through a call log, that the report tool was used: filing one of the two reports, or reports with wrong rates, still scores full marks.</p>
       </div>
       <div class="stack" style="gap:1.4rem">
         <div class="stack" style="gap:0.6rem">
@@ -275,6 +275,7 @@ footer a { color: var(--muted); }
           <pre><code>$ .tau2/v1.0.1/venv/bin/python examples/report_blind_spot.py
 gold run:                          reward 1.0
 same run, wrong report numbers:    reward 1.0  (DB tables that differ from gold: none)
+same run, second report left out:  reward 1.0
 same run, both reports left out:   reward 0.0</code></pre>
           <p class="small muted">Uses only the task's own correct run, no published data or model. Same result on the grader before and after v1.0.1. The tool and the missing table are unchanged in the newest release, v2.0.0 (by reading its source; not run).</p>
         </div>
@@ -286,7 +287,7 @@ same run, both reports left out:   reward 0.0</code></pre>
               <tbody>{{spot_rows}}</tbody>
             </table>
           </div>
-          <p class="small muted">All {{spot_reward1}} held-out runs that scored 1 on the {{spot_tasks}} affected tasks, checked directly against the gold reports. Every one of these scored full marks.</p>
+          <p class="small muted">All {{spot_reward1}} held-out runs that scored 1 on the {{spot_tasks}} affected tasks, checked directly against the gold reports; all three scored full marks. Claude Opus 5 filed two wrong reports, then the two correct ones as well.</p>
         </div>
       </div>
     </div>
@@ -299,7 +300,7 @@ same run, both reports left out:   reward 0.0</code></pre>
         <h2>What I'd do next</h2>
       </div>
       <ul class="list">
-        <li>Try every possible extra lookup per task instead of a random sample: the one change that would have explained all {{p3_events}} misgraded runs.</li>
+        <li>Try every possible extra lookup per task instead of five sampled ones: the one change that would have explained all {{p3_events}} misgraded runs.</li>
         <li>Add a check that alters the arguments of writes that leave nothing behind; it would have found the report blind spot from the gold runs alone.</li>
         <li>Report the blind spot to the benchmark's maintainers with the one-command reproduction.</li>
       </ul>
@@ -352,7 +353,7 @@ same run, both reports left out:   reward 0.0</code></pre>
   <section class="block wrap">
     <div class="wide stack" style="gap:1.2rem">
       <h2>Phase 2: does the bug change what is learned?</h2>
-      <p>A linear softmax policy over candidate tool calls, trained with REINFORCE on 30 banking tasks (10 held out), 10 seeds per grader, 3,000 episodes each. Every call is a real τ²-bench call graded by the real grader; true success is judged separately by the fixed grader plus an order check. The gate (the policy learns at all) held at {{p2_gate}}.</p>
+      <p>A linear softmax policy over candidate tool calls, trained with REINFORCE on 30 banking training tasks (10 more held out), 10 seeds per grader, 3,000 episodes each. Every call is a real τ²-bench call graded by the real grader; true success is judged separately by the fixed grader plus an order check. The gate (the policy learns at all) held at {{p2_gate}}.</p>
       <div class="legend"><span><i style="background:var(--series-2)"></i>old grader</span><span><i style="background:var(--series-1)"></i>fixed grader</span></div>
       {{chart_seeds}}
       <div class="tablewrap">
@@ -380,7 +381,7 @@ same run, both reports left out:   reward 0.0</code></pre>
           <thead><tr><th>Measure</th><th>Result</th></tr></thead>
           <tbody>
             <tr><td>H5: phase 1 explains the old grader's real errors</td><td><b>Not held.</b> {{p3_events}} of {{p3_eligible}} comparable runs misgraded (all false failures), across {{p3_event_tasks}} tasks; {{p3_explained}} explained, recall {{p3_recall}} {{p3_ci}} (task-clustered bootstrap). Needed ≥ 0.90.</td></tr>
-            <tr><td>The {{p3_unexplained}} misses</td><td>All have the extra-read trigger and the #329 table difference, on tasks {{p3_missed_tasks}}, which phase 1's one-variant-per-task draw never flagged. The trigger itself is present in every misgraded run (it fires in {{p3_p1_precision_runs}} runs; in the other {{p3_trigger_agree}} the two versions agree); the task-level flag alone is a weak predictor (enrichment {{p3_b1_enrichment}}).</td></tr>
+            <tr><td>The {{p3_unexplained}} misses</td><td>All have the extra-read trigger and the #329 table difference, on tasks {{p3_missed_tasks}}, where none of phase 1's five sampled extra reads per task used the tool these agents read. The trigger itself is present in every misgraded run (it fires in {{p3_p1_precision_runs}} runs; in the other {{p3_trigger_agree}} the two versions agree); the task-level flag alone is a weak predictor (enrichment {{p3_b1_enrichment}}).</td></tr>
             <tr><td>Number respelling in real runs</td><td>{{p3_p3_runs}} runs respell a number; {{p3_p3_events}} misgradings. Airline: {{p3_airline_floats}} whole-number floats in {{p3_airline_runs}} runs.</td></tr>
             <tr><td>Verification order (fixed grader)</td><td>{{p3_reward1}} full-score runs: {{p3_late_logs}} log verification after a change; {{p3_access_early}} show automated evidence of reading records before two identity facts (evidence, not violations).</td></tr>
             <tr><td>Old-code replay</td><td>{{p3_incompatible_range}} of comparable banking runs per file cannot be replayed on the old code (a state-changing tool's output changed), above the pre-registered 20% line; H5 covers the rest.</td></tr>
@@ -388,7 +389,7 @@ same run, both reports left out:   reward 0.0</code></pre>
         </table>
       </div>
       <h3>Model-assisted annotation (not human-validated)</h3>
-      <p>For mistakes no grader sees, {{h6_sample}} runs were drawn by a fixed rule and labelled blind (no score, group or id) by two independent language-model annotators, Claude Sonnet and DeepSeek V4-Pro, against a written codebook. The codebook was clarified once after the first pass (amendment 9, disclosed): agreement on whether a run has a violation went from κ {{h6_kappa_v1}} to κ {{h6_kappa_v2}} ({{h6_agree_v2}} of {{h6_sample}}). Disagreements were adjudicated against the full conversation, the bank's policy and the task's gold actions: <b>{{h6_hidden}} of the {{h6_reward1}} full-score runs</b> hide a violation, both false statements to the customer, one of them the wrong report numbers above. Small, stratified and not human-checked: no rate is claimed.</p>
+      <p>For mistakes no grader sees, {{h6_sample}} runs were drawn by a fixed rule and labelled blind (no score, group or id) by two independent language-model annotators, Claude Sonnet and DeepSeek V4-Pro, against a written codebook. The codebook was clarified once after the first pass (amendment 9, disclosed): agreement on whether a run has a violation went from κ {{h6_kappa_v1}} to κ {{h6_kappa_v2}} ({{h6_agree_v2}} of {{h6_sample}}). Disagreements were adjudicated against the full conversation, the bank's policy and the task's gold actions: <b>{{h6_hidden}} of the {{h6_reward1}} full-score runs</b> hide a violation, both false statements to the customer, one of them the wrong report numbers above. Adjudication was also done by a Claude model, the same family as one annotator. The pre-registered rule for growing the sample to about 80 runs was met but not run, for budget. Small, stratified and not human-checked: no rate is claimed.</p>
     </div>
   </section>
 
@@ -399,7 +400,7 @@ same run, both reports left out:   reward 0.0</code></pre>
         <li><code>submit_interest_discrepancy_report_7294</code> calls <code>add_to_db("interest_discrepancy_reports", …)</code>; the banking database model defines no such table, and <code>add_to_db</code> returns <code>False</code> for an unknown table. The tool ignores that and returns success. It is the only tool in the domain that writes to an undefined table.</li>
         <li>The grader compares database hashes, so the report's contents never reach it; the discoverable-tool call log records the tool name, which is why leaving the report out fails.</li>
         <li>Scope: tasks {{spot_task_list}} file reports in their gold runs. In the held-out runs, {{spot_differ}} of {{spot_reward1}} full-score runs on them filed reports whose numbers differ from gold.</li>
-        <li>Phase 1 counted these calls as "no-effect writes" but had no relation that varied their arguments. Not found in τ²-bench's issues or changelog (searched 11 Nov 2026); issue #753 documents the related call-log behaviour.</li>
+        <li>Filing only one of task 096's two reports, or one of task 097's four, also scores full marks: the call log records the tool name once. Phase 1 counted the repeated report calls in tasks 096 and 097 as "no-effect writes" but had no relation that varied their arguments. Not found in τ²-bench's issues or changelog (searched 11 Nov 2026); issue #753 documents the related call-log behaviour.</li>
       </ul>
     </div>
   </section>
@@ -412,7 +413,7 @@ same run, both reports left out:   reward 0.0</code></pre>
         <li>Four high-scoring agents and one domain; results describe their runs, not agents in general. Only the 1.x leaderboard version is tested; v2.0.0 is examined by code reading only.</li>
         <li>Offline replay uses a text-search retrieval in place of the runs' embedding search. Searches are reads, so grading is unaffected, but replayed search outputs differ.</li>
         <li>Phase 2's policy is open-loop and its true-success check is ours; it shows how a reward flaw shapes learning, not how a language model would behave.</li>
-        <li>Annotation is model-assisted and small (24 runs); the codebook was revised after a first pass. The blind-spot evidence does not depend on it.</li>
+        <li>Annotation is model-assisted and small (24 runs); the codebook was revised after a first pass, and the adjudicator is from the same model family as one annotator. The blind-spot evidence does not depend on it.</li>
         <li>Two amendments (8, 9) were written after results were seen; both are dated and say what changed. No hypothesis, threshold or sample was changed after its data was seen.</li>
       </ul>
     </div>

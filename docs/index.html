@@ -251,13 +251,13 @@ footer a { color: var(--muted); }
       <div class="col stack" style="margin-inline:0">
         <div class="eyebrow">Results</div>
         <h2>What each phase showed</h2>
-        <p class="lead">Every phase was pre-registered (hypotheses, thresholds and seeds written down and committed before the data was run). Two of the four main hypotheses failed and are reported as failed.</p>
+        <p class="lead">Every phase was pre-registered (hypotheses, thresholds and seeds written down and committed before the data was run). One of the five pre-registered hypotheses held (H1); H2 to H5 did not, and are reported as not held.</p>
       </div>
       <div class="cards">
         <div class="card"><span class="origin theirs">Bugs published by Sierra</span><h3>1 · It finds known grading bugs</h3><p>On the grader before the fix, an extra lookup was wrongly failed on <b>43 of 62</b> comparable banking tasks and a respelled number on <b>25 of 33</b>; on the fixed grader, on <b>0</b> and <b>0</b>. Controls in the unchanged domains: 0 mismatches.</p></div>
-        <div class="card"><span class="origin ours">Found here</span><h3>2 · A grader bug changes what is learned</h3><p>Policies trained on the buggy grader learned to stop right after the task; on the fixed one they kept checking. 7 of 10 buggy-grader seeds converged against 10 of 10, and true success fell 21 points. The pre-registered lookup measure did not reach significance.</p></div>
-        <div class="card"><span class="origin ours">Found here</span><h3>3 · Real frontier-agent runs</h3><p>On 4 public leaderboard files the old grader would wrongly fail <b>118</b> runs. Phase 1's flags cover 87 (74%), short of the pre-registered 90%: all 31 misses are the same bug on 6 tasks phase 1's sampling skipped.</p></div>
-        <div class="card"><span class="origin ours">New finding</span><h3>4 · A blind spot in the fixed grader</h3><p>Interest-discrepancy reports are silently discarded, so the grader can check that a report was filed but never what it says. It affects 5 banking tasks; 3 of 41 real full-score runs on them filed wrong numbers.</p></div>
+        <div class="card"><span class="origin ours">Found here</span><h3>2 · A grader bug changes what is learned</h3><p>Policies trained on the buggy grader learned to stop right after the task; on the fixed one they kept checking. 7 of 10 buggy-grader seeds converged against 10 of 10, so mean true success fell 21 points. This is exploratory: both pre-registered hypotheses for this phase failed.</p></div>
+        <div class="card"><span class="origin ours">Found here</span><h3>3 · Real frontier-agent runs</h3><p>On 4 public leaderboard files the old grader would wrongly fail <b>118</b> runs (counterfactual: they ran on the fixed version). Phase 1's flags cover 87 (74%), short of the pre-registered 90%, so H5 failed: all 31 misses are the same bug, on 6 tasks where none of phase 1's five sampled extra reads used the tool these agents read.</p></div>
+        <div class="card"><span class="origin ours">New finding</span><h3>4 · A blind spot in the fixed grader</h3><p>Interest-discrepancy reports are silently discarded, so the grader sees that the report tool was used, never what the reports say or how many were filed. It affects 5 banking tasks; 3 of 41 real full-score runs on them filed wrong numbers.</p></div>
       </div>
     </div>
   </section>
@@ -267,7 +267,7 @@ footer a { color: var(--muted); }
       <div class="col stack" style="margin-inline:0">
         <div class="eyebrow">The new finding</div>
         <h2>A report with wrong numbers still scores full marks</h2>
-        <p class="lead">In task 096 the customer's savings interest was underpaid. The agent should credit both accounts and file a discrepancy report for each, with the correct and the applied interest rate. The report tool answers "Submitted Successfully", but it writes to a database table that doesn't exist, and the helper that writes silently returns instead of failing. The report is lost. The grader only sees, through a call log, that the report tool was used.</p>
+        <p class="lead">In task 096 the customer's savings interest was underpaid. The agent should credit both accounts and file a discrepancy report for each, with the correct and the applied interest rate. The report tool answers "Submitted Successfully", but it writes to a database table that doesn't exist, and the helper that writes silently returns instead of failing. The report is lost. The grader only sees, through a call log, that the report tool was used: filing one of the two reports, or reports with wrong rates, still scores full marks.</p>
       </div>
       <div class="stack" style="gap:1.4rem">
         <div class="stack" style="gap:0.6rem">
@@ -275,6 +275,7 @@ footer a { color: var(--muted); }
           <pre><code>$ .tau2/v1.0.1/venv/bin/python examples/report_blind_spot.py
 gold run:                          reward 1.0
 same run, wrong report numbers:    reward 1.0  (DB tables that differ from gold: none)
+same run, second report left out:  reward 1.0
 same run, both reports left out:   reward 0.0</code></pre>
           <p class="small muted">Uses only the task's own correct run, no published data or model. Same result on the grader before and after v1.0.1. The tool and the missing table are unchanged in the newest release, v2.0.0 (by reading its source; not run).</p>
         </div>
@@ -286,7 +287,7 @@ same run, both reports left out:   reward 0.0</code></pre>
               <tbody><tr><td>GPT-5.5</td><td>093</td><td>1</td><td class="num">1 → 1</td><td>expected APY 4.25 (correct 4.275)</td></tr><tr><td>Claude Opus 5</td><td>096</td><td>3</td><td class="num">2 → 4</td><td>expected APY 3 (correct 3.25); expected APY 6.8 (correct 6.85)</td></tr><tr><td>Qwen3.8-max</td><td>096</td><td>0</td><td class="num">2 → 2</td><td>actual APY 2.4 (correct 2.55); expected APY 6.9 (correct 6.85)</td></tr></tbody>
             </table>
           </div>
-          <p class="small muted">All 41 held-out runs that scored 1 on the 5 affected tasks, checked directly against the gold reports. Every one of these scored full marks.</p>
+          <p class="small muted">All 41 held-out runs that scored 1 on the 5 affected tasks, checked directly against the gold reports; all three scored full marks. Claude Opus 5 filed two wrong reports, then the two correct ones as well.</p>
         </div>
       </div>
     </div>
@@ -299,7 +300,7 @@ same run, both reports left out:   reward 0.0</code></pre>
         <h2>What I'd do next</h2>
       </div>
       <ul class="list">
-        <li>Try every possible extra lookup per task instead of a random sample: the one change that would have explained all 118 misgraded runs.</li>
+        <li>Try every possible extra lookup per task instead of five sampled ones: the one change that would have explained all 118 misgraded runs.</li>
         <li>Add a check that alters the arguments of writes that leave nothing behind; it would have found the report blind spot from the gold runs alone.</li>
         <li>Report the blind spot to the benchmark's maintainers with the one-command reproduction.</li>
       </ul>
@@ -352,7 +353,7 @@ same run, both reports left out:   reward 0.0</code></pre>
   <section class="block wrap">
     <div class="wide stack" style="gap:1.2rem">
       <h2>Phase 2: does the bug change what is learned?</h2>
-      <p>A linear softmax policy over candidate tool calls, trained with REINFORCE on 30 banking tasks (10 held out), 10 seeds per grader, 3,000 episodes each. Every call is a real τ²-bench call graded by the real grader; true success is judged separately by the fixed grader plus an order check. The gate (the policy learns at all) held at 0.997.</p>
+      <p>A linear softmax policy over candidate tool calls, trained with REINFORCE on 30 banking training tasks (10 more held out), 10 seeds per grader, 3,000 episodes each. Every call is a real τ²-bench call graded by the real grader; true success is judged separately by the fixed grader plus an order check. The gate (the policy learns at all) held at 0.997.</p>
       <div class="legend"><span><i style="background:var(--series-2)"></i>old grader</span><span><i style="background:var(--series-1)"></i>fixed grader</span></div>
       <svg class="chart" viewBox="0 0 640 250" role="img" aria-label="True success per seed, old grader versus fixed grader"><line class="grid" x1="44" x2="632" y1="214.0" y2="214.0"/><text class="tick" x="36" y="218.0" text-anchor="end">0</text><line class="grid" x1="44" x2="632" y1="122.0" y2="122.0"/><text class="tick" x="36" y="126.0" text-anchor="end">0.5</text><line class="grid" x1="44" x2="632" y1="30.0" y2="30.0"/><text class="tick" x="36" y="34.0" text-anchor="end">1</text><line class="threshold" x1="44" x2="632" y1="66.8" y2="66.8"/><text class="tick" x="630" y="60.8" text-anchor="end">converged above 0.8</text><text class="tick" x="73.0" y="236" text-anchor="middle">0</text><circle cx="67.0" cy="30.0" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 0, old grader: 1.00</title></circle><circle cx="79.0" cy="30.0" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 0, fixed grader: 1.00</title></circle><text class="tick" x="131.0" y="236" text-anchor="middle">1</text><circle cx="125.0" cy="31.2" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 1, old grader: 0.99</title></circle><circle cx="137.0" cy="30.6" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 1, fixed grader: 1.00</title></circle><text class="tick" x="189.0" y="236" text-anchor="middle">2</text><circle cx="183.0" cy="30.6" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 2, old grader: 1.00</title></circle><circle cx="195.0" cy="30.0" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 2, fixed grader: 1.00</title></circle><text class="tick" x="247.0" y="236" text-anchor="middle">3</text><circle cx="241.0" cy="31.8" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 3, old grader: 0.99</title></circle><circle cx="253.0" cy="30.0" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 3, fixed grader: 1.00</title></circle><text class="tick" x="305.0" y="236" text-anchor="middle">4</text><circle cx="299.0" cy="31.2" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 4, old grader: 0.99</title></circle><circle cx="311.0" cy="30.6" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 4, fixed grader: 1.00</title></circle><text class="tick" x="363.0" y="236" text-anchor="middle">5</text><circle cx="357.0" cy="178.4" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 5, old grader: 0.19</title></circle><circle cx="369.0" cy="30.6" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 5, fixed grader: 1.00</title></circle><text class="tick" x="421.0" y="236" text-anchor="middle">6</text><circle cx="415.0" cy="30.6" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 6, old grader: 1.00</title></circle><circle cx="427.0" cy="30.0" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 6, fixed grader: 1.00</title></circle><text class="tick" x="479.0" y="236" text-anchor="middle">7</text><circle cx="473.0" cy="177.8" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 7, old grader: 0.20</title></circle><circle cx="485.0" cy="30.6" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 7, fixed grader: 1.00</title></circle><text class="tick" x="537.0" y="236" text-anchor="middle">8</text><circle cx="531.0" cy="127.5" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 8, old grader: 0.47</title></circle><circle cx="543.0" cy="31.2" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 8, fixed grader: 0.99</title></circle><text class="tick" x="595.0" y="236" text-anchor="middle">9</text><circle cx="589.0" cy="30.0" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 9, old grader: 1.00</title></circle><circle cx="601.0" cy="30.6" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 9, fixed grader: 1.00</title></circle><text class="tick" x="342" y="249" text-anchor="middle">seed</text></svg>
       <div class="tablewrap">
@@ -380,7 +381,7 @@ same run, both reports left out:   reward 0.0</code></pre>
           <thead><tr><th>Measure</th><th>Result</th></tr></thead>
           <tbody>
             <tr><td>H5: phase 1 explains the old grader's real errors</td><td><b>Not held.</b> 118 of 899 comparable runs misgraded (all false failures), across 22 tasks; 87 explained, recall 0.74 [0.48, 0.94] (task-clustered bootstrap). Needed ≥ 0.90.</td></tr>
-            <tr><td>The 31 misses</td><td>All have the extra-read trigger and the #329 table difference, on tasks 017, 018, 019, 049, 075, 076, which phase 1's one-variant-per-task draw never flagged. The trigger itself is present in every misgraded run (it fires in 254 runs; in the other 136 the two versions agree); the task-level flag alone is a weak predictor (enrichment 0.60).</td></tr>
+            <tr><td>The 31 misses</td><td>All have the extra-read trigger and the #329 table difference, on tasks 017, 018, 019, 049, 075, 076, where none of phase 1's five sampled extra reads per task used the tool these agents read. The trigger itself is present in every misgraded run (it fires in 254 runs; in the other 136 the two versions agree); the task-level flag alone is a weak predictor (enrichment 0.60).</td></tr>
             <tr><td>Number respelling in real runs</td><td>36 runs respell a number; 0 misgradings. Airline: 0 whole-number floats in 400 runs.</td></tr>
             <tr><td>Verification order (fixed grader)</td><td>634 full-score runs: 0 log verification after a change; 7 show automated evidence of reading records before two identity facts (evidence, not violations).</td></tr>
             <tr><td>Old-code replay</td><td>22%–30% of comparable banking runs per file cannot be replayed on the old code (a state-changing tool's output changed), above the pre-registered 20% line; H5 covers the rest.</td></tr>
@@ -388,7 +389,7 @@ same run, both reports left out:   reward 0.0</code></pre>
         </table>
       </div>
       <h3>Model-assisted annotation (not human-validated)</h3>
-      <p>For mistakes no grader sees, 24 runs were drawn by a fixed rule and labelled blind (no score, group or id) by two independent language-model annotators, Claude Sonnet and DeepSeek V4-Pro, against a written codebook. The codebook was clarified once after the first pass (amendment 9, disclosed): agreement on whether a run has a violation went from κ 0.59 to κ 0.70 (22 of 24). Disagreements were adjudicated against the full conversation, the bank's policy and the task's gold actions: <b>2 of the 16 full-score runs</b> hide a violation, both false statements to the customer, one of them the wrong report numbers above. Small, stratified and not human-checked: no rate is claimed.</p>
+      <p>For mistakes no grader sees, 24 runs were drawn by a fixed rule and labelled blind (no score, group or id) by two independent language-model annotators, Claude Sonnet and DeepSeek V4-Pro, against a written codebook. The codebook was clarified once after the first pass (amendment 9, disclosed): agreement on whether a run has a violation went from κ 0.59 to κ 0.70 (22 of 24). Disagreements were adjudicated against the full conversation, the bank's policy and the task's gold actions: <b>2 of the 16 full-score runs</b> hide a violation, both false statements to the customer, one of them the wrong report numbers above. Adjudication was also done by a Claude model, the same family as one annotator. The pre-registered rule for growing the sample to about 80 runs was met but not run, for budget. Small, stratified and not human-checked: no rate is claimed.</p>
     </div>
   </section>
 
@@ -399,7 +400,7 @@ same run, both reports left out:   reward 0.0</code></pre>
         <li><code>submit_interest_discrepancy_report_7294</code> calls <code>add_to_db("interest_discrepancy_reports", …)</code>; the banking database model defines no such table, and <code>add_to_db</code> returns <code>False</code> for an unknown table. The tool ignores that and returns success. It is the only tool in the domain that writes to an undefined table.</li>
         <li>The grader compares database hashes, so the report's contents never reach it; the discoverable-tool call log records the tool name, which is why leaving the report out fails.</li>
         <li>Scope: tasks 093, 094, 095, 096, 097 file reports in their gold runs. In the held-out runs, 3 of 41 full-score runs on them filed reports whose numbers differ from gold.</li>
-        <li>Phase 1 counted these calls as "no-effect writes" but had no relation that varied their arguments. Not found in τ²-bench's issues or changelog (searched 11 Nov 2026); issue #753 documents the related call-log behaviour.</li>
+        <li>Filing only one of task 096's two reports, or one of task 097's four, also scores full marks: the call log records the tool name once. Phase 1 counted the repeated report calls in tasks 096 and 097 as "no-effect writes" but had no relation that varied their arguments. Not found in τ²-bench's issues or changelog (searched 11 Nov 2026); issue #753 documents the related call-log behaviour.</li>
       </ul>
     </div>
   </section>
@@ -412,7 +413,7 @@ same run, both reports left out:   reward 0.0</code></pre>
         <li>Four high-scoring agents and one domain; results describe their runs, not agents in general. Only the 1.x leaderboard version is tested; v2.0.0 is examined by code reading only.</li>
         <li>Offline replay uses a text-search retrieval in place of the runs' embedding search. Searches are reads, so grading is unaffected, but replayed search outputs differ.</li>
         <li>Phase 2's policy is open-loop and its true-success check is ours; it shows how a reward flaw shapes learning, not how a language model would behave.</li>
-        <li>Annotation is model-assisted and small (24 runs); the codebook was revised after a first pass. The blind-spot evidence does not depend on it.</li>
+        <li>Annotation is model-assisted and small (24 runs); the codebook was revised after a first pass, and the adjudicator is from the same model family as one annotator. The blind-spot evidence does not depend on it.</li>
         <li>Two amendments (8, 9) were written after results were seen; both are dated and say what changed. No hypothesis, threshold or sample was changed after its data was seen.</li>
       </ul>
     </div>

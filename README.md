@@ -14,33 +14,36 @@ leaderboards rank agents wrongly.
 grader-preflight tests a grader with no AI model in the loop. It takes each task's known-correct run, makes small
 changes whose right verdict is known (an extra lookup should still pass; a dropped write should fail), runs them
 through the real environment and the unchanged grader, and flags every wrong verdict. It was checked three ways, each
-phase pre-registered in [`PREREGISTRATION.md`](PREREGISTRATION.md) before its data was run.
+phase pre-registered in [`PREREGISTRATION.md`](PREREGISTRATION.md) before its data was run. One of the five
+pre-registered hypotheses held; the other four are reported as not held.
 
 ## Results
 
 | Phase | Question | Result |
 |---|---|---|
 | 1 | Does it find the banking grading bugs τ²-bench's authors fixed in v1.0.1? | Yes: an extra lookup was wrongly failed on 43 of 62 comparable tasks before the fix, 0 after; a respelled number on 25 of 33, then 0. Controls: 0 mismatches. |
-| 2 | Does such a bug change what a learning agent does? | In behaviour, yes: policies trained on the buggy grader stop right after the task, those on the fixed grader keep checking; 7 of 10 buggy-grader seeds converged (10 of 10 fixed) and true success fell 21 points. Both pre-registered hypotheses (H3, H4) failed. |
-| 3 | Does it explain real grading errors in published frontier-agent runs? | Partly: the old grader would wrongly fail 118 runs by GPT-5.5, Claude Opus 4.7 and 5, and Qwen3.8-max; phase 1's flags cover 87 (recall 0.74, 95% interval 0.48–0.94), short of the pre-registered 0.90. All 31 misses are the same bug on 6 tasks phase 1's sampling skipped. |
+| 2 | Does such a bug change what a learning agent does? | Not as pre-registered: H3 and H4 failed. Exploratory: greedy policies trained on the buggy grader made 1.8 fewer checks after finishing the task (95% interval 0.8–2.7); 3 of 10 buggy-grader seeds collapsed (true success 19–47%), so mean true success fell 21 points (interval 0.4–43). |
+| 3 | Does it explain real grading errors in published frontier-agent runs? | Not fully: H5 failed. The old grader would wrongly fail 118 runs by GPT-5.5, Claude Opus 4.7, Claude Opus 5 and Qwen3.8-max (counterfactual: the runs were made on the fixed version); phase 1's flags cover 87 (recall 0.74, 95% interval 0.48–0.94), short of the pre-registered 0.90. All 31 misses are the same bug, on 6 tasks where none of phase 1's five sampled extra reads used the tool these agents read. |
 
-**New finding: the fixed grader can't see what an interest-discrepancy report says.** The report tool writes to a
-database table that doesn't exist and reports success anyway, so the grader only sees that a report was filed. A run
-whose reports carry wrong interest rates still scores full marks. This affects 5 banking tasks; in the published
-runs, 3 of the 41 full-score runs on them filed wrong numbers. It reproduces on both versions tested, and the code is
-unchanged in the newest release (v2.0.0, by reading its source). It is not in τ²-bench's issues or changelog as of
-11 Nov 2026.
+**New finding: the fixed grader can't see interest-discrepancy reports.** The report tool writes to a database table
+that doesn't exist and reports success anyway, so the grader only sees that the tool was used: not what the reports
+say, how many were filed, or for which account. A run whose reports carry wrong interest rates, or that files one of
+two required reports, still scores full marks. This affects 5 banking tasks; in the published runs, 3 of the 41
+full-score runs on them filed wrong numbers (one then filed correct reports as well). It reproduces on both versions
+tested, and v2.0.0's tool still writes to the undefined table (from reading its source; not run). I found no report
+of it in τ²-bench's issues or changelog (searched 11 Nov 2026).
 
 ```console
 $ .tau2/v1.0.1/venv/bin/python examples/report_blind_spot.py
 gold run:                          reward 1.0
 same run, wrong report numbers:    reward 1.0  (DB tables that differ from gold: none)
+same run, second report left out:  reward 1.0
 same run, both reports left out:   reward 0.0
 ```
 
 The phase 1 defects are Sierra's, fixed in their pull requests #329 and #397; everything else was found here. Phase
-3's check for hidden mistakes in conversations used two language-model annotators and is model-assisted, not
-human-validated; the blind-spot evidence above does not depend on it.
+3's check for hidden mistakes in conversations used two language-model annotators, with disagreements settled by a
+third model pass, and is model-assisted, not human-validated; the blind-spot evidence above does not depend on it.
 
 ## Run it
 
@@ -58,7 +61,7 @@ Phase 1's metrics should match [`results/phase1.json`](results/phase1.json). Pha
 (`experiment.py --full`) takes about 1.5 hours on 8 cores. Phase 3 on published runs needs τ²-bench's leaderboard
 trajectory files, downloaded separately; the commands are in [`docs/DESIGN.md`](docs/DESIGN.md#phase-3) and their
 aggregate output is [`results/phase3.json`](results/phase3.json). To use other interpreters, set `TAU2_OLD_PYTHON`
-and `TAU2_NEW_PYTHON`.
+and `TAU2_NEW_PYTHON` (or `make OLD=… NEW=…`).
 
 ## How it works
 
