@@ -118,12 +118,18 @@ tr.us td:first-child { font-weight: 650; }
 .chart { background: #fff; border-radius: var(--radius); padding: 1.4rem 1.5rem 1.2rem; box-shadow: inset 0 0 0 1px var(--line); }
 .chart h3 { margin-bottom: 0.2rem; }
 .chart .cap { font-size: 14px; color: var(--muted); margin-bottom: 1.1rem; }
-.bars { display: grid; grid-template-columns: minmax(130px, 190px) 1fr 70px; gap: 0.75rem 1rem; align-items: center; }
+.bars { display: grid; grid-template-columns: minmax(110px, 150px) 1fr 70px; gap: 0.75rem 1rem; align-items: center; }
 .bars .row { display: contents; }
 .bars .name { font-size: 15px; }
 .bars .name small { display: block; font-size: 12.5px; color: var(--muted); }
 .bars .track { height: 16px; border-radius: 6px; background: var(--band); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
-.bars .fill { height: 100%; border-radius: 0 6px 6px 0; background: linear-gradient(90deg, #6f95ff, var(--accent)); }
+.bars .fill { height: 100%; border-radius: 0 6px 6px 0; background: var(--series-1); }
+.bars .fill.old { background: var(--series-2); }
+.split { position: relative; display: flex; gap: 2px; height: 22px; margin-block: 0.6rem 1rem; }
+.split i { display: block; height: 100%; }
+.split i:first-child { border-radius: 6px 0 0 6px; }
+.split i:last-of-type { flex: 1; border-radius: 0 6px 6px 0; }
+.split .target { position: absolute; left: 90%; top: -5px; bottom: -5px; width: 2px; background: var(--ink); }
 .bars .val { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
 .bars .row:hover .fill { filter: brightness(0.92); }
 @media (max-width: 560px) { .bars { grid-template-columns: 1fr 64px; } .bars .name { grid-column: 1 / -1; margin-bottom: -0.4rem; } }
@@ -252,6 +258,20 @@ footer a { color: var(--muted); }
         <div class="eyebrow">Results</div>
         <h2>What each phase showed</h2>
         <p class="lead">Every phase was pre-registered (hypotheses, thresholds and seeds written down and committed before the data was run). One of the five pre-registered hypotheses held (H1); H2 to H5 did not, and are reported as not held.</p>
+      </div>
+      <div class="pair">
+        <div class="chart">
+          <h3>Phase 1: the known bugs, before and after the fix</h3>
+          <p class="cap">Banking tasks where a change that should pass was wrongly failed</p>
+          <div class="bars">{{chart_fix}}</div>
+        </div>
+        <div class="chart">
+          <h3>Phase 3: real runs the old grader would misgrade</h3>
+          <p class="cap">Share of the {{p3_events}} wrongly failed runs that phase 1's flags explain</p>
+          <div class="split" role="img" aria-label="{{p3_explained}} of {{p3_events}} explained; the pre-registered target was 90%"><i style="width:{{p3_recall_pct}};background:var(--series-1)" title="{{p3_explained}} explained"></i><i style="background:var(--series-2)" title="{{p3_unexplained}} not explained"></i><span class="target" title="pre-registered target: 90%"></span></div>
+          <div class="legend"><span><i style="background:var(--series-1)"></i>{{p3_explained}} explained ({{p3_recall_pct}})</span><span><i style="background:var(--series-2)"></i>{{p3_unexplained}} missed, one bug on {{p3_missed_task_count}} tasks</span><span><i style="background:var(--ink);border-radius:1px;width:3px"></i>target 90%</span></div>
+          <p class="small muted" style="margin-top:0.8rem">The runs were made on the fixed grader; these are the verdicts the old grader would have given them. All {{p3_unexplained}} misses are the same extra-lookup bug, on tasks where phase 1's five sampled lookups never used the tool these agents used.</p>
+        </div>
       </div>
       <div class="cards">
         <div class="card"><span class="origin theirs">Bugs published by Sierra</span><h3>1 · It finds known grading bugs</h3><p>On the grader before the fix, an extra lookup was wrongly failed on <b>{{p1_p1_old}} of {{p1_comparable}}</b> comparable banking tasks and a respelled number on <b>{{p1_p3_old}} of {{p1_p3_tasks}}</b>; on the fixed grader, on <b>{{p1_p1_new}}</b> and <b>{{p1_p3_new}}</b>. Controls in the unchanged domains: {{p1_control}} mismatches.</p></div>

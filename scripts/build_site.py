@@ -46,6 +46,24 @@ def interval(low, high, places=2):
     return f"[{num(low, places)}, {num(high, places)}]"
 
 
+def fix_bars(p1):
+    """Phase 1: tasks each should-pass change was wrongly failed on, old grader versus fixed."""
+    rows = []
+    for change, key, total in (
+        ("Extra lookup", "p1", p1["comparable_banking_tasks"]),
+        ("Number respelled", "p3", p1["p3_paired_verdicts"]),
+    ):
+        for side, label in (("old", "old grader"), ("new", "fixed grader")):
+            n = p1[f"{key}_flagged_tasks_{side}"]
+            rows.append(
+                f'<div class="row"><div class="name">{change}<small>{label}</small></div>'
+                f'<div class="track" title="{change}, {label}: {n} of {total} tasks">'
+                f'<div class="fill {side}" style="width:{100 * n / total:.1f}%"></div></div>'
+                f'<div class="val">{n} / {total}</div></div>'
+            )
+    return "".join(rows)
+
+
 def seeds_chart(p2):
     """True success over the last 300 training episodes, one dot per seed and grader."""
     width, height, left, top, bottom = 640, 250, 44, 30, 36
@@ -193,6 +211,7 @@ def values():
             f'<td class="num">{d["gold_reports"]} → {d["filed_reports"]}</td><td>{difference_text(d)}</td></tr>'
             for d in spot["reports_differ_from_gold"]
         ),
+        "chart_fix": fix_bars(p1),
         "chart_seeds": seeds_chart(p2),
         "chart_events": events_chart(p3),
     }

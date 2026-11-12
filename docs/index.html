@@ -118,12 +118,18 @@ tr.us td:first-child { font-weight: 650; }
 .chart { background: #fff; border-radius: var(--radius); padding: 1.4rem 1.5rem 1.2rem; box-shadow: inset 0 0 0 1px var(--line); }
 .chart h3 { margin-bottom: 0.2rem; }
 .chart .cap { font-size: 14px; color: var(--muted); margin-bottom: 1.1rem; }
-.bars { display: grid; grid-template-columns: minmax(130px, 190px) 1fr 70px; gap: 0.75rem 1rem; align-items: center; }
+.bars { display: grid; grid-template-columns: minmax(110px, 150px) 1fr 70px; gap: 0.75rem 1rem; align-items: center; }
 .bars .row { display: contents; }
 .bars .name { font-size: 15px; }
 .bars .name small { display: block; font-size: 12.5px; color: var(--muted); }
 .bars .track { height: 16px; border-radius: 6px; background: var(--band); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
-.bars .fill { height: 100%; border-radius: 0 6px 6px 0; background: linear-gradient(90deg, #6f95ff, var(--accent)); }
+.bars .fill { height: 100%; border-radius: 0 6px 6px 0; background: var(--series-1); }
+.bars .fill.old { background: var(--series-2); }
+.split { position: relative; display: flex; gap: 2px; height: 22px; margin-block: 0.6rem 1rem; }
+.split i { display: block; height: 100%; }
+.split i:first-child { border-radius: 6px 0 0 6px; }
+.split i:last-of-type { flex: 1; border-radius: 0 6px 6px 0; }
+.split .target { position: absolute; left: 90%; top: -5px; bottom: -5px; width: 2px; background: var(--ink); }
 .bars .val { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
 .bars .row:hover .fill { filter: brightness(0.92); }
 @media (max-width: 560px) { .bars { grid-template-columns: 1fr 64px; } .bars .name { grid-column: 1 / -1; margin-bottom: -0.4rem; } }
@@ -252,6 +258,20 @@ footer a { color: var(--muted); }
         <div class="eyebrow">Results</div>
         <h2>What each phase showed</h2>
         <p class="lead">Every phase was pre-registered (hypotheses, thresholds and seeds written down and committed before the data was run). One of the five pre-registered hypotheses held (H1); H2 to H5 did not, and are reported as not held.</p>
+      </div>
+      <div class="pair">
+        <div class="chart">
+          <h3>Phase 1: the known bugs, before and after the fix</h3>
+          <p class="cap">Banking tasks where a change that should pass was wrongly failed</p>
+          <div class="bars"><div class="row"><div class="name">Extra lookup<small>old grader</small></div><div class="track" title="Extra lookup, old grader: 43 of 62 tasks"><div class="fill old" style="width:69.4%"></div></div><div class="val">43 / 62</div></div><div class="row"><div class="name">Extra lookup<small>fixed grader</small></div><div class="track" title="Extra lookup, fixed grader: 0 of 62 tasks"><div class="fill new" style="width:0.0%"></div></div><div class="val">0 / 62</div></div><div class="row"><div class="name">Number respelled<small>old grader</small></div><div class="track" title="Number respelled, old grader: 25 of 33 tasks"><div class="fill old" style="width:75.8%"></div></div><div class="val">25 / 33</div></div><div class="row"><div class="name">Number respelled<small>fixed grader</small></div><div class="track" title="Number respelled, fixed grader: 0 of 33 tasks"><div class="fill new" style="width:0.0%"></div></div><div class="val">0 / 33</div></div></div>
+        </div>
+        <div class="chart">
+          <h3>Phase 3: real runs the old grader would misgrade</h3>
+          <p class="cap">Share of the 118 wrongly failed runs that phase 1's flags explain</p>
+          <div class="split" role="img" aria-label="87 of 118 explained; the pre-registered target was 90%"><i style="width:74%;background:var(--series-1)" title="87 explained"></i><i style="background:var(--series-2)" title="31 not explained"></i><span class="target" title="pre-registered target: 90%"></span></div>
+          <div class="legend"><span><i style="background:var(--series-1)"></i>87 explained (74%)</span><span><i style="background:var(--series-2)"></i>31 missed, one bug on 6 tasks</span><span><i style="background:var(--ink);border-radius:1px;width:3px"></i>target 90%</span></div>
+          <p class="small muted" style="margin-top:0.8rem">The runs were made on the fixed grader; these are the verdicts the old grader would have given them. All 31 misses are the same extra-lookup bug, on tasks where phase 1's five sampled lookups never used the tool these agents used.</p>
+        </div>
       </div>
       <div class="cards">
         <div class="card"><span class="origin theirs">Bugs published by Sierra</span><h3>1 · It finds known grading bugs</h3><p>On the grader before the fix, an extra lookup was wrongly failed on <b>43 of 62</b> comparable banking tasks and a respelled number on <b>25 of 33</b>; on the fixed grader, on <b>0</b> and <b>0</b>. Controls in the unchanged domains: 0 mismatches.</p></div>
