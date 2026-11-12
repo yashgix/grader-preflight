@@ -6,9 +6,9 @@ Every verdict in this project is the DB-state verdict of `EnvironmentEvaluator.c
 the environment arguments τ²-bench's runner uses for the task. Tasks are those with `DB` in `reward_basis`; the
 COMMUNICATE, NL_ASSERTION and ACTION terms are never the subject of a variant. Phase 1 covers `banking_knowledge`
 (built with the `grep_only` retrieval variant, so no API is reached), `airline` and `retail`. Phase 2 covers banking
-only, over the tasks phase 1 found comparable across the two tags. Phase 3 covers banking and airline, on synthetic
-trajectory files built from τ²-bench's own gold actions; real published files are handled by the same commands later,
-outside the build.
+only, over the tasks phase 1 found comparable across the two tags. Phase 3 covers banking and airline: its tests and
+synthetic experiment use trajectory files built from τ²-bench's own gold actions, and the published leaderboard runs go
+through the same `regrade`, `analyze` and `sample` commands (their aggregate results are in `results/phase3.json`).
 
 Environments are built only in `preflight/tau2_adapter.py`, never through τ²-bench's constructors directly. On v1.0.1
 banking logs a read to the hashed agent DB only when the read is on a per-task allowlist built by τ²-bench's runner;
@@ -31,9 +31,14 @@ the grader.
 | `preflight/trajectories.py` | `as_simulation`, `load`, `restore_ids`, `calls`, `task_matches`, `replay`, `diff_tables`, `p1_trigger`, `p3_trigger`, `schema_floats`, `as_integers`, `numeric_pair`, `late_verification`, `regrade`, `flags` |
 | `preflight/trajectory_analysis.py` | `analyze` and `sample`: join two regrade folders, H5 and H7, `runs.csv`, `report.md`, H6's blinded packets |
 | `preflight/phase3.py` | `build_synthetic`, `worker`, `run_phase3`; the synthetic trajectory audit and its metrics |
+| `preflight/envs.py` | the two pinned interpreters: `TAU2_OLD_PYTHON` / `TAU2_NEW_PYTHON`, else the venvs `scripts/setup-tau2.sh` builds |
 | `preflight/__main__.py` | CLI for the phase 1 `run` and `compare` commands |
 | `experiment.py` | one command per phase: the phase 1 suite under both environments, the phase 2 smoke or full sweep, and the phase 3 audit (the default) |
 | `demo.py` | a few tasks through the phase 1 relations, a short phase 2 training run, or a few synthetic phase 3 runs, printed |
+| `examples/report_blind_spot.py` | the minimal reproduction of the discrepancy-report blind spot, from task 096's gold run |
+| `scripts/setup-tau2.sh` | builds both pinned τ²-bench environments from τ²-bench's lockfile plus `env/requirements-extra.txt` |
+| `scripts/collect_results.py` | aggregates the three phases' outputs into `results/*.json` (counts only, no trajectory contents) |
+| `scripts/build_site.py` | fills `docs/template.html` from `results/*.json` into `docs/index.html`; `tests/test_site.py` keeps them in step |
 
 ## Phase 1
 
@@ -301,6 +306,23 @@ extra reads, order, altered writes — is.
   file carries when it has one (else the domain's policy file), and the messages. `key.json` holds the packet number,
   the run id and the stratum, and nothing in a packet names a reward, a stratum, a flag or an id.
 
+### Published runs
+
+The leaderboard trajectory files stay outside this repository and are never redistributed; paths are arguments and only
+aggregate counts are written (amendment 7). The held-out files and the rule that chose them are in amendment 7. With
+`OLD` and `NEW` the two interpreters and `PUBLISHED` the downloaded files:
+
+```sh
+$OLD -m preflight.trajectories regrade PUBLISHED/*.json --out regrade/old     # replay, regrade, triggers per run
+$NEW -m preflight.trajectories regrade PUBLISHED/*.json --out regrade/new
+$OLD -m preflight.trajectories flags PHASE1/results/old/banking_knowledge.json --out flags.json   # phase 1's flags
+$NEW -m preflight.trajectories analyze --old regrade/old --new regrade/new --flags flags.json \
+  --pool data/banking_pool.json --out analysis                                   # H5, H7, runs.csv, report
+$NEW -m preflight.trajectories sample --old regrade/old --new regrade/new --flags flags.json \
+  --pool data/banking_pool.json --files PUBLISHED/*_banking.json --out h6        # H6's blinded 24-run sample
+$NEW scripts/collect_results.py --phase1 PHASE1 --phase2 PHASE2 --phase3 . --trajectories PUBLISHED
+```
+
 ### The synthetic experiment (`preflight/phase3.py`)
 
 - `experiment.py --phase 3` (the default) dispatches `python -m preflight.phase3 worker` into each environment, as phase
@@ -330,9 +352,10 @@ extra reads, order, altered writes — is.
   and its oracle is ours. A G_old run needs the v1.0.1 interpreter to learn its true success, so the pipeline
   dispatches that step as a separate process. The smoke is not the full sweep: held-out evaluation, G_proc, H3 and H4
   are not computed by `--phase 2`.
-- Phase 3 in this build has no real trajectory file: every number comes from synthetic runs built from gold actions,
-  so it shows that the pipeline works, not what published agents did. `access_before_facts` is `None` on synthetic
-  runs because they carry no user message with text. A run's end state is compared as two DB hashes and a list of
-  top-level table names. H6 has no labelers here: the packets and the key are produced, the labels are not, and no
-  population rate can be read off a stratified sample in any case. A file whose incompatible share is high is
+- Phase 3's synthetic experiment (`experiment.py --phase 3`) shows that the pipeline works, not what published agents
+  did; the published-run results come from the same commands on the leaderboard files, which are not in this
+  repository. `access_before_facts` is `None` on synthetic runs because they carry no user message with text. A run's end state is compared as two DB hashes and a list of
+  top-level table names. H6's labels come from outside this code (two
+  independent language-model annotators, then adjudication; amendments 8 and 9), and no population rate can be read off
+  a stratified sample. A file whose incompatible share is high is
   reported, not tuned around.

@@ -9,62 +9,57 @@
   ],
   "reports_differ_from_gold": [
    {
-    "file": "gpt55_banking",
-    "filed_not_in_gold": [
+    "differences": [
      {
-      "account_id": "sav_sp93k4m7n2_silver",
-      "actual_apy": 4.0,
-      "amount_difference": 33.0,
-      "expected_apy": 4.25,
-      "user_id": "sp93k4m7n2"
+      "account": "sav_sp93k4m7n2_silver",
+      "field": "expected_apy",
+      "filed": 4.25,
+      "gold": 4.275
      }
     ],
+    "file": "gpt55_banking",
     "filed_reports": 1,
     "gold_reports": 1,
     "task": "task_093",
     "trial": 1
    },
    {
-    "file": "opus5_banking",
-    "filed_not_in_gold": [
+    "differences": [
      {
-      "account_id": "sav_ni73k9m4p2_bronze",
-      "actual_apy": 2.55,
-      "amount_difference": 17.5,
-      "expected_apy": 3.0,
-      "user_id": "ni73k9m4p2"
+      "account": "sav_ni73k9m4p2_bronze",
+      "field": "expected_apy",
+      "filed": 3.0,
+      "gold": 3.25
      },
      {
-      "account_id": "sav_ni73k9m4p2_goldplus",
-      "actual_apy": 6.55,
-      "amount_difference": 15.0,
-      "expected_apy": 6.8,
-      "user_id": "ni73k9m4p2"
+      "account": "sav_ni73k9m4p2_goldplus",
+      "field": "expected_apy",
+      "filed": 6.8,
+      "gold": 6.85
      }
     ],
+    "file": "opus5_banking",
     "filed_reports": 4,
     "gold_reports": 2,
     "task": "task_096",
     "trial": 3
    },
    {
-    "file": "qwen38max_banking",
-    "filed_not_in_gold": [
+    "differences": [
      {
-      "account_id": "sav_ni73k9m4p2_bronze",
-      "actual_apy": 2.4,
-      "amount_difference": 17.5,
-      "expected_apy": 3.25,
-      "user_id": "ni73k9m4p2"
+      "account": "sav_ni73k9m4p2_bronze",
+      "field": "actual_apy",
+      "filed": 2.4,
+      "gold": 2.55
      },
      {
-      "account_id": "sav_ni73k9m4p2_goldplus",
-      "actual_apy": 6.55,
-      "amount_difference": 15.0,
-      "expected_apy": 6.9,
-      "user_id": "ni73k9m4p2"
+      "account": "sav_ni73k9m4p2_goldplus",
+      "field": "expected_apy",
+      "filed": 6.9,
+      "gold": 6.85
      }
     ],
+    "file": "qwen38max_banking",
     "filed_reports": 2,
     "gold_reports": 2,
     "task": "task_096",

@@ -12,6 +12,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -30,8 +31,24 @@ def read(path):
     return json.loads(Path(path).read_text())
 
 
+def _number(pattern, text):
+    match = re.search(pattern, text)
+    if not match:
+        raise ValueError(f"phase 1 report has no line matching {pattern!r}")
+    return int(match.group(1))
+
+
 def phase1(folder):
     m = read(folder / "metrics.json")
+    text = (folder / "report.md").read_text()
+    counts = {
+        "comparable_banking_tasks": len(read(ROOT / "data" / "banking_pool.json")["tasks"]),
+        "p1_paired_verdicts": _number(r"H1\(a\): \w+ - paired verdicts: (\d+)", text),
+        "p3_paired_verdicts": _number(r"H1\(b\): \w+ - paired verdicts: (\d+)", text),
+        "f3_variants": _number(r"F3 pass rate NEW: [\d.]+ \(\d+/(\d+);", text),
+        "f6_tasks": _number(r"F6 banking pass share NEW: [\d.]+ \(\d+/(\d+) tasks", text),
+        "f1_airline_verdicts": _number(r"F1 airline passing tasks NEW: \d+ \((\d+) verdicts", text),
+    }
     keys = [
         "attempted_old",
         "attempted_new",
@@ -50,7 +67,7 @@ def phase1(folder):
         "h1b_held",
         "h2_held",
     ]
-    return {k: m[k] for k in keys}
+    return {k: m[k] for k in keys} | counts
 
 
 def phase2(folder):
@@ -104,7 +121,14 @@ def blind_spot(records_dir, trajectory_dir):
             rows[run["task_id"]] += 1
             gold, filed = reports(gold_calls(task)), reports(trajectories.calls(run["messages"]))
             if sorted(map(json.dumps, gold)) != sorted(map(json.dumps, filed)):
-                wrong = [r for r in filed if r not in gold]
+                gold_by_account = {r["account_id"]: r for r in gold}
+                differences = [
+                    {"account": r["account_id"], "field": k, "filed": v, "gold": gold_by_account[r["account_id"]][k]}
+                    for r in filed
+                    if r not in gold and r["account_id"] in gold_by_account
+                    for k, v in r.items()
+                    if v != gold_by_account[r["account_id"]].get(k)
+                ]
                 differing.append(
                     {
                         "file": path.stem,
@@ -112,7 +136,7 @@ def blind_spot(records_dir, trajectory_dir):
                         "trial": run["trial"],
                         "gold_reports": len(gold),
                         "filed_reports": len(filed),
-                        "filed_not_in_gold": wrong,
+                        "differences": differences,
                     }
                 )
     return {

@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>grader-preflight</title>
+<meta name="description" content="An independent research project: testing the graders that score AI agents on τ²-bench, against its real bug fixes, a reinforcement-learning experiment and published frontier-agent runs.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* One bright theme. Blue is the accent and the fixed grader; orange is the old grader and what was missed. */
+:root {
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  color-scheme: light;
+  --paper: #ffffff;
+  --band: #f6f8fc;
+  --ink: #141b2d;
+  --muted: #566078;
+  --line: #e4e8f1;
+  --accent: #2457d6;
+  --accent-ink: #1b46b3;
+  --accent-soft: #edf2ff;
+  --kept: #12935b;
+  --kept-soft: #e8f7ef;
+  --lost: #e0533d;
+  --lost-soft: #fdeeea;
+  --amber: #b7791f;
+  --code: #f1f4fa;
+  --sans: "Geist", -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --radius: 16px;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans); font-size: 17px; line-height: 1.65; -webkit-font-smoothing: antialiased; }
+a { color: var(--accent-ink); text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+code { font-family: var(--mono); font-size: 0.85em; background: var(--code); padding: 0.1em 0.4em; border-radius: 6px; overflow-wrap: anywhere; }
+h1, h2, h3 { margin: 0; line-height: 1.2; text-wrap: balance; }
+p { margin: 0; }
+.wrap { padding-inline: max(16px, env(safe-area-inset-left, 0px)); }
+.col { max-width: 740px; margin-inline: auto; }
+.wide { max-width: 1040px; margin-inline: auto; }
+.stack { display: flex; flex-direction: column; gap: 1.1rem; }
+.stack > *, .wide, .col { min-width: 0; }
+.eyebrow { font-size: 13px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--accent-ink); }
+.muted { color: var(--muted); }
+.small { font-size: 14px; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* Top bar with the two views */
+.bar { position: sticky; top: 0; z-index: 10; background: rgba(255,255,255,0.92); backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--line); }
+.bar .wide { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 60px; }
+.brand { font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; }
+.brand span { color: var(--muted); font-weight: 500; }
+.tabs { display: inline-flex; padding: 4px; background: var(--band); border: 1px solid var(--line); border-radius: 999px; }
+.tabs button { font: inherit; font-size: 14px; font-weight: 550; color: var(--muted); background: none; border: 0; padding: 6px 14px; border-radius: 999px; cursor: pointer; }
+.tabs button[aria-selected="true"] { background: #fff; color: var(--ink); box-shadow: 0 1px 2px rgba(20,27,45,0.12); }
+@media (max-width: 560px) { .brand span, .tabs .long { display: none; } .tabs button { padding: 6px 10px; } .brand { font-size: 15px; } }
+
+/* Hero */
+header.hero { padding-block: 4.5rem 3rem; background: radial-gradient(1200px 380px at 15% -10%, #e3ebff 0%, rgba(227,235,255,0) 60%), radial-gradient(900px 340px at 95% 0%, #e8f7ef 0%, rgba(232,247,239,0) 55%), var(--paper); }
+.hero h1 { font-size: clamp(2.2rem, 5.4vw, 3.4rem); font-weight: 700; letter-spacing: -0.035em; margin-top: 0.6rem; }
+.hero .sub { display: block; font-size: clamp(1.25rem, 2.6vw, 1.6rem); font-weight: 500; letter-spacing: -0.02em; color: var(--accent-ink); margin-top: 0.5rem; }
+.lede { font-size: 1.2rem; color: var(--muted); line-height: 1.6; max-width: 62ch; margin-top: 1.4rem; }
+.chips { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.4rem; }
+.chip { font-size: 13px; font-weight: 550; padding: 0.3rem 0.75rem; border-radius: 999px; background: #fff; box-shadow: inset 0 0 0 1px var(--line); color: var(--muted); }
+.chip b { color: var(--ink); }
+.actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.8rem; }
+.btn { display: inline-flex; align-items: center; gap: 0.5rem; font-weight: 600; font-size: 15px; text-decoration: none; padding: 0.7rem 1.1rem; border-radius: 12px; border: 0; cursor: pointer; font-family: inherit; }
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.primary:hover { background: var(--accent-ink); }
+.btn.ghost { background: #fff; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+
+section.block { padding-block: 3.5rem; }
+section.block.band { background: var(--band); }
+section.block h2 { font-size: clamp(1.55rem, 3vw, 2rem); font-weight: 700; letter-spacing: -0.025em; }
+section.block h3 { font-size: 1.1rem; font-weight: 650; }
+.lead { font-size: 1.08rem; color: var(--muted); }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; }
+.card { background: #fff; border-radius: var(--radius); padding: 1.3rem 1.35rem; box-shadow: 0 1px 2px rgba(20,27,45,0.05), inset 0 0 0 1px var(--line); }
+.card h3 { margin-bottom: 0.35rem; }
+.card p { color: var(--muted); font-size: 15.5px; }
+.card .icon { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); margin-bottom: 0.8rem; }
+
+blockquote.quote { margin: 0; padding: 1.4rem 1.6rem; border-radius: var(--radius); background: #fff; box-shadow: inset 0 0 0 1px var(--line); position: relative; }
+blockquote.quote::before { content: "\201C"; position: absolute; top: -0.35rem; left: 1rem; font-size: 4rem; line-height: 1; color: var(--accent); opacity: 0.25; }
+blockquote.quote p { font-size: 1.12rem; line-height: 1.55; }
+blockquote.quote cite { display: block; margin-top: 0.8rem; font-style: normal; font-size: 14px; color: var(--muted); }
+
+.tablewrap { overflow-x: auto; border-radius: var(--radius); box-shadow: inset 0 0 0 1px var(--line); background: #fff; }
+table { width: 100%; border-collapse: collapse; font-size: 15px; }
+th, td { text-align: left; padding: 0.7rem 0.9rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); background: var(--band); }
+tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.us td { background: #f7f9ff; }
+td:first-child { white-space: nowrap; }
+tr.us td:first-child { font-weight: 650; }
+
+/* Flow diagram */
+.flow { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: stretch; gap: 0.6rem; }
+.flow .node { background: #fff; border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: inset 0 0 0 1px var(--line); }
+.flow .node b { display: block; font-size: 15px; }
+.flow .node span { font-size: 14px; color: var(--muted); }
+.flow .node.accent { box-shadow: inset 0 0 0 2px var(--accent); }
+.flow .arrow { align-self: center; color: var(--muted); font-size: 1.4rem; }
+.facts { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.6rem; }
+.fact { font-size: 12.5px; font-weight: 600; padding: 0.15rem 0.55rem; border-radius: 999px; }
+.fact.kept { background: var(--kept-soft); color: var(--kept); }
+.fact.lost { background: var(--lost-soft); color: var(--lost); }
+@media (max-width: 760px) { .flow { grid-template-columns: 1fr; } .flow .arrow { transform: rotate(90deg); justify-self: center; } }
+
+/* Bar chart */
+.chart { background: #fff; border-radius: var(--radius); padding: 1.4rem 1.5rem 1.2rem; box-shadow: inset 0 0 0 1px var(--line); }
+.chart h3 { margin-bottom: 0.2rem; }
+.chart .cap { font-size: 14px; color: var(--muted); margin-bottom: 1.1rem; }
+.bars { display: grid; grid-template-columns: minmax(130px, 190px) 1fr 70px; gap: 0.75rem 1rem; align-items: center; }
+.bars .row { display: contents; }
+.bars .name { font-size: 15px; }
+.bars .name small { display: block; font-size: 12.5px; color: var(--muted); }
+.bars .track { height: 16px; border-radius: 6px; background: var(--band); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+.bars .fill { height: 100%; border-radius: 0 6px 6px 0; background: linear-gradient(90deg, #6f95ff, var(--accent)); }
+.bars .val { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.bars .row:hover .fill { filter: brightness(0.92); }
+@media (max-width: 560px) { .bars { grid-template-columns: 1fr 64px; } .bars .name { grid-column: 1 / -1; margin-bottom: -0.4rem; } }
+
+/* Small multiples: errors that instructions removed */
+.mini { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+.mini .card h3 { font-size: 15px; }
+.dots { display: grid; grid-template-columns: auto 1fr auto; gap: 0.35rem 0.6rem; align-items: center; margin-top: 0.7rem; font-size: 13.5px; }
+.dots .lab { color: var(--muted); }
+.dots .meter { height: 8px; border-radius: 4px; background: var(--band); overflow: hidden; }
+.dots .meter i { display: block; height: 100%; background: var(--lost); border-radius: 4px; }
+.dots .n { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Examples */
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 760px) { .pair { grid-template-columns: 1fr; } }
+.reply { background: #fff; border-radius: var(--radius); padding: 1.1rem 1.25rem; box-shadow: inset 0 0 0 1px var(--line); border-top: 4px solid var(--line); font-size: 15.5px; }
+.reply.kept { border-top-color: var(--kept); }
+.reply.lost { border-top-color: var(--lost); }
+.reply .who { font-size: 12.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 0.5rem; }
+.reply.kept .who { color: var(--kept); }
+.reply.lost .who { color: var(--lost); }
+.reply .note { margin-top: 0.6rem; font-size: 13.5px; color: var(--muted); }
+.ask { font-size: 15px; color: var(--muted); margin-bottom: 0.4rem; }
+.ask b { color: var(--ink); }
+
+.list { margin: 0; padding-left: 1.2rem; }
+.list li { margin: 0.35rem 0; }
+.steps { counter-reset: s; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.8rem; }
+.step { background: #fff; border-radius: 14px; padding: 0.9rem 1rem; box-shadow: inset 0 0 0 1px var(--line); font-size: 14.5px; }
+.step::before { counter-increment: s; content: counter(s); display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; font-size: 13px; margin-bottom: 0.4rem; }
+.step b { display: block; }
+.step span { color: var(--muted); }
+.tag { display: inline-block; font-size: 12px; font-weight: 650; padding: 0.1rem 0.5rem; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); white-space: nowrap; }
+.tag.grey { background: var(--band); color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); }
+pre { margin: 0; font-family: var(--mono); font-size: 13.5px; background: var(--code); padding: 1rem 1.1rem; border-radius: 12px; overflow-x: auto; line-height: 1.55; }
+details.more { background: #fff; border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line); padding: 0.8rem 1.1rem; }
+details.more summary { cursor: pointer; font-weight: 600; }
+details.more[open] summary { margin-bottom: 0.6rem; }
+
+footer { border-top: 1px solid var(--line); padding-block: 2.2rem; font-size: 14px; color: var(--muted); }
+footer .wide { display: flex; flex-wrap: wrap; gap: 0.6rem 1.4rem; justify-content: space-between; }
+footer a { color: var(--muted); }
+
+[hidden] { display: none !important; }
+
+.chart { width: 100%; height: auto; display: block; font-family: var(--sans); }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .threshold { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
+.chart .tick { fill: var(--muted); font-size: 12px; }
+.chart .value { fill: var(--ink); font-size: 12px; font-variant-numeric: tabular-nums; }
+.chart .dot { stroke: var(--paper); stroke-width: 2; }
+.legend { display: flex; gap: 1.2rem; flex-wrap: wrap; font-size: 14px; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 0.4rem; vertical-align: middle; }
+.origin { display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: 0.03em; padding: 0.15rem 0.55rem; border-radius: 999px; margin-bottom: 0.6rem; }
+.origin.theirs { background: var(--band); color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); }
+.origin.ours { background: var(--accent-soft); color: var(--accent-ink); }
+.big { font-size: 2rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div class="bar wrap">
+  <div class="wide">
+    <div class="brand">grader-preflight <span>· independent research project</span></div>
+    <div class="tabs" role="tablist" aria-label="View">
+      <button role="tab" id="tab-overview" aria-controls="overview" aria-selected="true" data-view="overview">Overview</button>
+      <button role="tab" id="tab-details" aria-controls="details" aria-selected="false" data-view="details"><span class="long">Technical </span>details</button>
+    </div>
+  </div>
+</div>
+
+<main id="overview" role="tabpanel" aria-labelledby="tab-overview">
+  <header class="hero wrap">
+    <div class="wide">
+      <div class="eyebrow">Independent research project</div>
+      <h1>grader-preflight<span class="sub">Testing the graders that score AI agents, before anyone trains on them</span></h1>
+      <p class="lede">Agents that handle customer requests, write code or run workflows are trained and ranked by automatic graders: code that decides whether a task was done. When a grader is wrong, training rewards the wrong behaviour and leaderboards rank agents wrongly. I built a tool that tests a grader with no AI model in the loop, and checked it three ways on τ²-bench, a widely used benchmark for customer-service agents: against the grading bugs its authors later fixed, inside a small reinforcement-learning experiment, and on published runs by frontier agents.</p>
+      <div class="chips">
+        <span class="chip"><b>3</b> pre-registered phases</span>
+        <span class="chip"><b>{{p1_attempted}}</b> test cases per grader version</span>
+        <span class="chip"><b>{{p3_events}}</b> real agent runs the old grader would misgrade</span>
+        <span class="chip"><b>1</b> new grader blind spot</span>
+      </div>
+      <div class="actions">
+        <a class="btn primary" href="https://github.com/yashgix/grader-preflight">View the code on GitHub</a>
+        <button class="btn ghost" type="button" data-view="details">Technical details →</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="block wrap">
+    <div class="wide stack" style="gap:1.6rem">
+      <div class="col stack" style="margin-inline:0">
+        <div class="eyebrow">The problem</div>
+        <h2>A grader is part of the environment, and it can be wrong</h2>
+        <p class="lead">In τ²-bench an agent talks to a simulated customer and calls tools that read and change a bank's, airline's or shop's database. The grader replays the agent's tool calls and compares the final database with the one a known-correct run produces. In July 2026 the benchmark's authors, Sierra, fixed several banking grading bugs in release v1.0.1 and reported that rescoring moved leaderboard results by up to about nine points.</p>
+      </div>
+      <div class="cards">
+        <div class="card"><div class="icon">×</div><h3>It can fail a correct run</h3><p>Before v1.0.1, one harmless extra lookup was logged into the database the grader compares, so a careful agent lost the whole task.</p></div>
+        <div class="card"><div class="icon">✓</div><h3>It can pass a wrong run</h3><p>Comparing only the final database can't see the order of steps, or a change that leaves nothing behind.</p></div>
+        <div class="card"><div class="icon">↻</div><h3>It teaches what it rewards</h3><p>In reinforcement learning the grader is the reward. A flaw doesn't just change a score; it changes what the agent learns to do.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block band wrap">
+    <div class="wide stack" style="gap:1.4rem">
+      <div class="col stack" style="margin-inline:0">
+        <div class="eyebrow">The method</div>
+        <h2>Change a correct run slightly, and check the grader's answer</h2>
+        <p class="lead">For each task the benchmark ships one correct run. The preflight makes small changes whose right verdict is known in advance, runs them through the real environment and the unchanged grader, and flags any verdict that comes out wrong. It needs no AI model and covers a whole domain in about three minutes.</p>
+      </div>
+      <div class="flow" aria-label="A known-correct run is changed, graded, and the verdict checked">
+        <div class="node"><b>Known-correct run</b><span>the task's own gold tool calls</span></div>
+        <div class="arrow">→</div>
+        <div class="node accent"><b>A small, known change</b><span>should still pass: an extra lookup, 25 written as 25.0, an unknown tool name. Should fail: a write dropped, nothing done, verification moved after the changes</span></div>
+        <div class="arrow">→</div>
+        <div class="node"><b>The real grader</b><span>unchanged, in the version under test; a wrong verdict is flagged with the database tables that differ</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block wrap">
+    <div class="wide stack" style="gap:1.4rem">
+      <div class="col stack" style="margin-inline:0">
+        <div class="eyebrow">Results</div>
+        <h2>What each phase showed</h2>
+        <p class="lead">Every phase was pre-registered (hypotheses, thresholds and seeds written down and committed before the data was run). Two of the four main hypotheses failed and are reported as failed.</p>
+      </div>
+      <div class="cards">
+        <div class="card"><span class="origin theirs">Bugs published by Sierra</span><h3>1 · It finds known grading bugs</h3><p>On the grader before the fix, an extra lookup was wrongly failed on <b>{{p1_p1_old}} of {{p1_comparable}}</b> comparable banking tasks and a respelled number on <b>{{p1_p3_old}} of {{p1_p3_tasks}}</b>; on the fixed grader, on <b>{{p1_p1_new}}</b> and <b>{{p1_p3_new}}</b>. Controls in the unchanged domains: {{p1_control}} mismatches.</p></div>
+        <div class="card"><span class="origin ours">Found here</span><h3>2 · A grader bug changes what is learned</h3><p>Policies trained on the buggy grader learned to stop right after the task; on the fixed one they kept checking. {{p2_converged_old}} of 10 buggy-grader seeds converged against {{p2_converged_new}} of 10, and true success fell {{p2_true_points}} points. The pre-registered lookup measure did not reach significance.</p></div>
+        <div class="card"><span class="origin ours">Found here</span><h3>3 · Real frontier-agent runs</h3><p>On {{p3_banking_files}} public leaderboard files the old grader would wrongly fail <b>{{p3_events}}</b> runs. Phase 1's flags cover {{p3_explained}} ({{p3_recall_pct}}), short of the pre-registered 90%: all {{p3_unexplained}} misses are the same bug on {{p3_missed_task_count}} tasks phase 1's sampling skipped.</p></div>
+        <div class="card"><span class="origin ours">New finding</span><h3>4 · A blind spot in the fixed grader</h3><p>Interest-discrepancy reports are silently discarded, so the grader can check that a report was filed but never what it says. It affects {{spot_tasks}} banking tasks; {{spot_differ}} of {{spot_reward1}} real full-score runs on them filed wrong numbers.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block band wrap">
+    <div class="wide stack" style="gap:1.4rem">
+      <div class="col stack" style="margin-inline:0">
+        <div class="eyebrow">The new finding</div>
+        <h2>A report with wrong numbers still scores full marks</h2>
+        <p class="lead">In task 096 the customer's savings interest was underpaid. The agent should credit both accounts and file a discrepancy report for each, with the correct and the applied interest rate. The report tool answers "Submitted Successfully", but it writes to a database table that doesn't exist, and the helper that writes silently returns instead of failing. The report is lost. The grader only sees, through a call log, that the report tool was used.</p>
+      </div>
+      <div class="stack" style="gap:1.4rem">
+        <div class="stack" style="gap:0.6rem">
+          <h3>Reproduce it in one command</h3>
+          <pre><code>$ .tau2/v1.0.1/venv/bin/python examples/report_blind_spot.py
+gold run:                          reward 1.0
+same run, wrong report numbers:    reward 1.0  (DB tables that differ from gold: none)
+same run, both reports left out:   reward 0.0</code></pre>
+          <p class="small muted">Uses only the task's own correct run, no published data or model. Same result on the grader before and after v1.0.1. The tool and the missing table are unchanged in the newest release, v2.0.0 (by reading its source; not run).</p>
+        </div>
+        <div class="stack" style="gap:0.6rem">
+          <h3>Real agents hit it</h3>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Agent</th><th>Task</th><th>Trial</th><th class="num">Reports: gold → filed</th><th>Values filed wrongly</th></tr></thead>
+              <tbody>{{spot_rows}}</tbody>
+            </table>
+          </div>
+          <p class="small muted">All {{spot_reward1}} held-out runs that scored 1 on the {{spot_tasks}} affected tasks, checked directly against the gold reports. Every one of these scored full marks.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block wrap">
+    <div class="wide stack" style="gap:1.2rem">
+      <div class="col stack" style="margin-inline:0">
+        <div class="eyebrow">Next</div>
+        <h2>What I'd do next</h2>
+      </div>
+      <ul class="list">
+        <li>Try every possible extra lookup per task instead of a random sample: the one change that would have explained all {{p3_events}} misgraded runs.</li>
+        <li>Add a check that alters the arguments of writes that leave nothing behind; it would have found the report blind spot from the gold runs alone.</li>
+        <li>Report the blind spot to the benchmark's maintainers with the one-command reproduction.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<main id="details" role="tabpanel" aria-labelledby="tab-details" hidden>
+  <header class="hero wrap" style="padding-block:3rem 2rem">
+    <div class="wide">
+      <div class="eyebrow">Technical details</div>
+      <h1 style="font-size:clamp(1.9rem,4.4vw,2.6rem)">Method, data, results and limits</h1>
+    </div>
+  </header>
+
+  <section class="block wrap" style="padding-top:1rem">
+    <div class="wide stack" style="gap:1.2rem">
+      <h2>Architecture</h2>
+      <div class="steps">
+        <div class="step"><b>Adapter</b><span>Runs tool calls on a live τ²-bench environment and scores them with τ²-bench's own, unchanged grader. Frozen since phase 1.</span></div>
+        <div class="step"><b>Relations</b><span>Six changes to a gold run, each with a known right verdict (P1, P3, P5 should pass; F1, F3, F6 should fail).</span></div>
+        <div class="step"><b>Phase 1 suite</b><span>Runs every relation on every task and compares the two grader versions case by case.</span></div>
+        <div class="step"><b>Phase 2 learner</b><span>A small policy trained with REINFORCE on real tool calls, rewarded by one grader version.</span></div>
+        <div class="step"><b>Phase 3 audit</b><span>Replays published agent runs, regrades them under both versions and checks them against the relations.</span></div>
+      </div>
+      <p class="muted">The two grader versions are τ²-bench at <code>pre-v1.0.1</code> (commit <code>b51a6d6</code>) and <code>v1.0.1</code> (<code>fc0055d</code>), each in its own pinned environment built from τ²-bench's lockfile. One process loads one version; results are joined afterwards. Design notes: <a href="https://github.com/yashgix/grader-preflight/blob/main/docs/DESIGN.md">DESIGN.md</a>. Hypotheses, thresholds, seeds and the nine dated amendments: <a href="https://github.com/yashgix/grader-preflight/blob/main/PREREGISTRATION.md">PREREGISTRATION.md</a>.</p>
+    </div>
+  </section>
+
+  <section class="block band wrap">
+    <div class="wide stack" style="gap:1.2rem">
+      <h2>Phase 1: the known bugs</h2>
+      <p>Every relation on every banking, airline and retail task, on both versions: {{p1_attempted}} cases per side, {{p1_errors}} errors, two identical runs. Banking tasks whose data changed between the versions ({{p1_changed}}) are left out of the comparison.</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Relation</th><th>Change to the gold run</th><th>Right verdict</th><th>Old grader</th><th>Fixed grader</th></tr></thead>
+          <tbody>
+            <tr><td>P1</td><td>one extra read through a discoverable tool</td><td>pass</td><td>fails on {{p1_p1_old}} of {{p1_comparable}} tasks ({{p1_p1_pairs}} paired cases)</td><td>fails on {{p1_p1_new}}</td></tr>
+            <tr><td>P3</td><td>a number respelled (25 as 25.0)</td><td>pass</td><td>fails on {{p1_p3_old}} of {{p1_p3_tasks}} tasks</td><td>fails on {{p1_p3_new}}</td></tr>
+            <tr><td>F3</td><td>one write dropped</td><td>fail</td><td colspan="2">passes {{p1_f3_pass}} of {{p1_f3_variants}} variants</td></tr>
+            <tr><td>F1</td><td>nothing done (airline)</td><td>fail</td><td colspan="2">passes on {{p1_f1_airline}} of {{p1_f1_verdicts}} tasks, all whose gold run changes nothing</td></tr>
+            <tr><td>F6</td><td>verification moved after the changes</td><td>fail</td><td colspan="2">passes on {{p1_f6_pass}} of {{p1_f6_tasks}} tasks: order is invisible to the grader</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small muted">P1 and P3 match Sierra's fixes #329 and #397; every P1 flag differs only in the read-log table #329 is about. The airline and retail controls, unchanged between versions, gave {{p1_control}} mismatches. H1 held; H2 did not, only because of F1, as amendment 3 predicted before the run.</p>
+    </div>
+  </section>
+
+  <section class="block wrap">
+    <div class="wide stack" style="gap:1.2rem">
+      <h2>Phase 2: does the bug change what is learned?</h2>
+      <p>A linear softmax policy over candidate tool calls, trained with REINFORCE on 30 banking tasks (10 held out), 10 seeds per grader, 3,000 episodes each. Every call is a real τ²-bench call graded by the real grader; true success is judged separately by the fixed grader plus an order check. The gate (the policy learns at all) held at {{p2_gate}}.</p>
+      <div class="legend"><span><i style="background:var(--series-2)"></i>old grader</span><span><i style="background:var(--series-1)"></i>fixed grader</span></div>
+      {{chart_seeds}}
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Pre-registered</th><th>Result</th></tr></thead>
+          <tbody>
+            <tr><td>H3: RL finds nothing phase 1 missed</td><td><b>Not held.</b> {{p2_h3_finds}} distinct full-reward runs a stricter check marks wrong, {{p2_h3_recall}} in a class phase 1 flagged; the rest are wrong-ID writes that fail or are overwritten, invisible to a final-state grader.</td></tr>
+            <tr><td>H4: the old grader suppresses lookups at no cost</td><td><b>Not held.</b> Extra lookups, old minus fixed: {{p2_reads_diff}} {{p2_reads_ci}} (interval crosses 0). True success: {{p2_true_diff}} {{p2_true_ci}}.</td></tr>
+            <tr><td>Exploratory (amendment 6)</td><td>Greedy policies: lookups after the task is done, old minus fixed, {{p2_post_reads}} {{p2_post_reads_ci}}.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small muted">Means over seeds with 95% bootstrap intervals; every seed reported, converged or not. The policy sees only which calls it has made, not tool outputs, so this is a controlled experiment on the reward, not a model of LLM agents.</p>
+    </div>
+  </section>
+
+  <section class="block band wrap">
+    <div class="wide stack" style="gap:1.2rem">
+      <h2>Phase 3: published frontier-agent runs</h2>
+      <p>Six public leaderboard trajectory files, chosen by a rule fixed before download: four banking (GPT-5.5, Claude Opus 4.7, Qwen3.8-max, Claude Opus 5; {{p3_runs_per_file}} runs each) and two airline ({{p3_airline_runs}} runs). Each run is replayed in both pinned environments and regraded. All four banking files turned out to have been produced on v1.0.1 itself, so the old grader's verdicts are <b>counterfactual</b>: what it would have said about these runs. Our regrade on v1.0.1 equals the leaderboard's recorded reward on {{p3_faithful_min}}–{{p3_faithful_max}} of {{p3_faithful_of}} graded runs per file.</p>
+      <div class="legend"><span><i style="background:var(--series-1)"></i>explained by phase 1's flags</span><span><i style="background:var(--series-2)"></i>not explained</span></div>
+      {{chart_events}}
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Measure</th><th>Result</th></tr></thead>
+          <tbody>
+            <tr><td>H5: phase 1 explains the old grader's real errors</td><td><b>Not held.</b> {{p3_events}} of {{p3_eligible}} comparable runs misgraded (all false failures), across {{p3_event_tasks}} tasks; {{p3_explained}} explained, recall {{p3_recall}} {{p3_ci}} (task-clustered bootstrap). Needed ≥ 0.90.</td></tr>
+            <tr><td>The {{p3_unexplained}} misses</td><td>All have the extra-read trigger and the #329 table difference, on tasks {{p3_missed_tasks}}, which phase 1's one-variant-per-task draw never flagged. The trigger itself is present in every misgraded run (it fires in {{p3_p1_precision_runs}} runs; in the other {{p3_trigger_agree}} the two versions agree); the task-level flag alone is a weak predictor (enrichment {{p3_b1_enrichment}}).</td></tr>
+            <tr><td>Number respelling in real runs</td><td>{{p3_p3_runs}} runs respell a number; {{p3_p3_events}} misgradings. Airline: {{p3_airline_floats}} whole-number floats in {{p3_airline_runs}} runs.</td></tr>
+            <tr><td>Verification order (fixed grader)</td><td>{{p3_reward1}} full-score runs: {{p3_late_logs}} log verification after a change; {{p3_access_early}} show automated evidence of reading records before two identity facts (evidence, not violations).</td></tr>
+            <tr><td>Old-code replay</td><td>{{p3_incompatible_range}} of comparable banking runs per file cannot be replayed on the old code (a state-changing tool's output changed), above the pre-registered 20% line; H5 covers the rest.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Model-assisted annotation (not human-validated)</h3>
+      <p>For mistakes no grader sees, {{h6_sample}} runs were drawn by a fixed rule and labelled blind (no score, group or id) by two independent language-model annotators, Claude Sonnet and DeepSeek V4-Pro, against a written codebook. The codebook was clarified once after the first pass (amendment 9, disclosed): agreement on whether a run has a violation went from κ {{h6_kappa_v1}} to κ {{h6_kappa_v2}} ({{h6_agree_v2}} of {{h6_sample}}). Disagreements were adjudicated against the full conversation, the bank's policy and the task's gold actions: <b>{{h6_hidden}} of the {{h6_reward1}} full-score runs</b> hide a violation, both false statements to the customer, one of them the wrong report numbers above. Small, stratified and not human-checked: no rate is claimed.</p>
+    </div>
+  </section>
+
+  <section class="block wrap">
+    <div class="wide stack" style="gap:1.2rem">
+      <h2>The report blind spot</h2>
+      <ul class="list">
+        <li><code>submit_interest_discrepancy_report_7294</code> calls <code>add_to_db("interest_discrepancy_reports", …)</code>; the banking database model defines no such table, and <code>add_to_db</code> returns <code>False</code> for an unknown table. The tool ignores that and returns success. It is the only tool in the domain that writes to an undefined table.</li>
+        <li>The grader compares database hashes, so the report's contents never reach it; the discoverable-tool call log records the tool name, which is why leaving the report out fails.</li>
+        <li>Scope: tasks {{spot_task_list}} file reports in their gold runs. In the held-out runs, {{spot_differ}} of {{spot_reward1}} full-score runs on them filed reports whose numbers differ from gold.</li>
+        <li>Phase 1 counted these calls as "no-effect writes" but had no relation that varied their arguments. Not found in τ²-bench's issues or changelog (searched 11 Nov 2026); issue #753 documents the related call-log behaviour.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="block band wrap">
+    <div class="wide stack" style="gap:1.2rem">
+      <h2>Limits and threats to validity</h2>
+      <ul class="list">
+        <li>Phase 3's old-grader verdicts are counterfactual; no agent here faced the old grader. {{p3_incompatible_range}} of old-code replays are incompatible.</li>
+        <li>Four high-scoring agents and one domain; results describe their runs, not agents in general. Only the 1.x leaderboard version is tested; v2.0.0 is examined by code reading only.</li>
+        <li>Offline replay uses a text-search retrieval in place of the runs' embedding search. Searches are reads, so grading is unaffected, but replayed search outputs differ.</li>
+        <li>Phase 2's policy is open-loop and its true-success check is ours; it shows how a reward flaw shapes learning, not how a language model would behave.</li>
+        <li>Annotation is model-assisted and small (24 runs); the codebook was revised after a first pass. The blind-spot evidence does not depend on it.</li>
+        <li>Two amendments (8, 9) were written after results were seen; both are dated and say what changed. No hypothesis, threshold or sample was changed after its data was seen.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="block wrap">
+    <div class="wide stack" style="gap:1.2rem">
+      <h2>Related work</h2>
+      <ul class="list">
+        <li>Sierra, <a href="https://github.com/sierra-research/tau2-bench/releases/tag/v1.0.1">τ²-bench v1.0.1</a>: the banking grading fixes and their effect on the leaderboard (the bugs phase 1 tests for).</li>
+        <li><a href="https://github.com/sierra-research/tau2-bench/issues/753">τ²-bench issue #753</a>: an audit of banking task data and scoring, including call-log behaviour related to the blind spot.</li>
+        <li>Ray, <a href="https://arxiv.org/abs/2606.01066">Fuzzing RLVR verifiers</a> (2026): planted verifier bugs found by a small RL search, on single-turn tasks.</li>
+        <li>Xin, <a href="https://arxiv.org/abs/2609.01354">Where the verifier fails</a> (2026): metamorphic tests for math answer verifiers.</li>
+        <li>Cao et al., <a href="https://arxiv.org/abs/2603.03116">procedure-aware evaluation</a> (2026), and <a href="https://github.com/chrisbartoloburlo/llmcontract-tau2">llmcontract-tau2</a>: process violations behind passing τ-bench runs in the airline and retail domains.</li>
+        <li>Bhat et al., <a href="https://arxiv.org/abs/2607.02577">a validity audit of tool-calling evaluation</a> (2026): expert-labelled grading errors across benchmarks.</li>
+      </ul>
+      <p class="small muted">What this project adds: a model-free grader test checked against a benchmark's real before-and-after fixes, its effect on learned behaviour, its coverage measured on held-out frontier-agent runs, and a previously unreported blind spot.</p>
+    </div>
+  </section>
+
+  <section class="block band wrap">
+    <div class="wide stack" style="gap:1.2rem">
+      <h2>Reproduce</h2>
+      <pre><code>./scripts/setup-tau2.sh                                   # both pinned τ²-bench environments (git, uv)
+.tau2/v1.0.1/venv/bin/python -m unittest discover -s tests -t .
+.tau2/v1.0.1/venv/bin/python examples/report_blind_spot.py
+.tau2/pre-v1.0.1/venv/bin/python experiment.py --phase 1 --out runs/phase1/metrics.json
+.tau2/pre-v1.0.1/venv/bin/python experiment.py --phase 3 --out runs/phase3/metrics.json</code></pre>
+      <p class="small muted">Phase 2's full sweep (<code>experiment.py --full</code>) takes about 1.5 hours on 8 cores. Phase 3 on published data needs the leaderboard files, downloaded separately; they are not redistributed here because their licence is not stated (τ²-bench issue #612). Commands in the README.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap">
+  <div class="wide">
+    <span>Yash Gupta · <a href="https://github.com/yashgix">GitHub</a> · <a href="https://www.linkedin.com/in/yash-guptaix">LinkedIn</a></span>
+    <span>An independent project, not affiliated with Sierra. τ²-bench is MIT-licensed; published leaderboard runs are used for aggregate analysis only.</span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var views = ["overview", "details"];
+  function show(view, scroll) {
+    views.forEach(function (v) {
+      document.getElementById(v).hidden = v !== view;
+      document.getElementById("tab-" + v).setAttribute("aria-selected", String(v === view));
+    });
+    if (scroll) window.scrollTo({ top: 0 });
+    if (location.hash !== "#" + view) history.replaceState(null, "", view === "overview" ? location.pathname : "#details");
+  }
+  document.querySelectorAll("[data-view]").forEach(function (el) {
+    el.addEventListener("click", function () { show(el.getAttribute("data-view"), true); });
+  });
+  window.addEventListener("hashchange", function () { show(location.hash === "#details" ? "details" : "overview", true); });
+  show(location.hash === "#details" ? "details" : "overview", false);
+})();
+</script>
+</body>
+</html>
