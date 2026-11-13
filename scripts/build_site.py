@@ -1,8 +1,8 @@
 """Fill docs/template.html with values and charts computed from results/*.json, writing docs/index.html.
 
 Every measured number on the page comes from the results files, so the page can't drift from the data (fixed design
-facts such as the seed count are written in the template). Placeholders look like {{name}}; an unknown or unused name is
-an error.
+facts such as the seed count are written in the template). Placeholders look like {{name}}, and an unknown or unused name
+is an error.
 
     python3 scripts/build_site.py
 """
@@ -29,7 +29,7 @@ NAMES = {
 
 def difference_text(row):
     """'expected APY 4.25 (correct 4.275)' for each field a filed report got wrong."""
-    return "; ".join(
+    return ", ".join(
         f"{d['field'].replace('_apy', ' APY')} {d['filed']:g} (correct {d['gold']:g})" for d in row["differences"]
     )
 
@@ -61,6 +61,23 @@ def fix_bars(p1):
                 f'<div class="fill {side}" style="width:{100 * n / total:.1f}%"></div></div>'
                 f'<div class="val">{n} / {total}</div></div>'
             )
+    return "".join(rows)
+
+
+def run_bars(p2):
+    """Phase 2: one column per training run, its height the run's true success, and how many runs learned the task."""
+    rows = []
+    for side, label in (("old", "old grader"), ("new", "fixed grader")):
+        runs = p2["per_seed"][side]
+        cols = "".join(
+            f'<i style="height:{100 * runs[str(s)]["true"]:.0f}%" title="Run {s}, {label}: {runs[str(s)]["true"]:.2f}"></i>'
+            for s in range(len(runs))
+        )
+        learned = p2["metrics"][f"converged_seeds_{side}"]
+        rows.append(
+            f'<div class="row"><div class="name">{label.capitalize()}</div>'
+            f'<div class="runs {side}">{cols}</div><div class="val">{learned} / {len(runs)}</div></div>'
+        )
     return "".join(rows)
 
 
@@ -212,6 +229,8 @@ def values():
             for d in spot["reports_differ_from_gold"]
         ),
         "chart_fix": fix_bars(p1),
+        "chart_runs": run_bars(p2),
+        "p2_collapsed": str(len(p2["per_seed"]["old"]) - m2["converged_seeds_old"]),
         "chart_seeds": seeds_chart(p2),
         "chart_events": events_chart(p3),
     }

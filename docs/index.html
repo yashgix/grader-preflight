@@ -125,6 +125,11 @@ tr.us td:first-child { font-weight: 650; }
 .bars .track { height: 16px; border-radius: 6px; background: var(--band); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
 .bars .fill { height: 100%; border-radius: 0 6px 6px 0; background: var(--series-1); }
 .bars .fill.old { background: var(--series-2); }
+.runs { display: flex; align-items: flex-end; gap: 3px; height: 44px; border-bottom: 1px solid var(--line); }
+.runs i { flex: 1; min-height: 2px; border-radius: 4px 4px 0 0; background: var(--series-1); }
+.runs.old i { background: var(--series-2); }
+.pair .wide-row { grid-column: 1 / -1; }
+h2[id] { scroll-margin-top: 84px; }
 .split { position: relative; display: flex; gap: 2px; height: 22px; margin-block: 0.6rem 1rem; }
 .split i { display: block; height: 100%; }
 .split i:first-child { border-radius: 6px 0 0 6px; }
@@ -230,7 +235,7 @@ footer a { color: var(--muted); }
       <div class="cards">
         <div class="card"><div class="icon">×</div><h3>It can fail a correct run</h3><p>Before v1.0.1, one harmless extra lookup was logged into the database the grader compares, so a careful agent lost the whole task.</p></div>
         <div class="card"><div class="icon">✓</div><h3>It can pass a wrong run</h3><p>Comparing only the final database can't see the order of steps, or a change that leaves nothing behind.</p></div>
-        <div class="card"><div class="icon">↻</div><h3>It teaches what it rewards</h3><p>In reinforcement learning the grader is the reward. A flaw doesn't just change a score; it changes what the agent learns to do.</p></div>
+        <div class="card"><div class="icon">↻</div><h3>It teaches what it rewards</h3><p>In reinforcement learning the grader is the reward. A flaw doesn't just change a score. It changes what the agent learns to do.</p></div>
       </div>
     </div>
   </section>
@@ -247,7 +252,7 @@ footer a { color: var(--muted); }
         <div class="arrow">→</div>
         <div class="node accent"><b>A small, known change</b><span>should still pass: an extra lookup, 25 written as 25.0, an unknown tool name. Should fail: a write dropped, nothing done, verification moved after the changes</span></div>
         <div class="arrow">→</div>
-        <div class="node"><b>The real grader</b><span>unchanged, in the version under test; a wrong verdict is flagged with the database tables that differ</span></div>
+        <div class="node"><b>The real grader</b><span>unchanged, in the version under test, and a wrong verdict is flagged with the database tables that differ</span></div>
       </div>
     </div>
   </section>
@@ -257,7 +262,8 @@ footer a { color: var(--muted); }
       <div class="col stack" style="margin-inline:0">
         <div class="eyebrow">Results</div>
         <h2>What each phase showed</h2>
-        <p class="lead">Every phase was pre-registered (hypotheses, thresholds and seeds written down and committed before the data was run). One of the five pre-registered hypotheses held (H1); H2 to H5 did not, and are reported as not held.</p>
+        <p class="lead">Every phase was pre-registered (hypotheses, thresholds and seeds written down and committed before the data was run). One of the five pre-registered hypotheses held (H1). H2 to H5 did not, and are reported as not held.</p>
+        <p class="small">Full details for each phase are in Technical details: <a href="#phase-1">phase 1</a>, <a href="#phase-2">phase 2</a>, <a href="#phase-3">phase 3</a> and <a href="#blind-spot">the blind spot</a>.</p>
       </div>
       <div class="pair">
         <div class="chart">
@@ -266,18 +272,24 @@ footer a { color: var(--muted); }
           <div class="bars"><div class="row"><div class="name">Extra lookup<small>old grader</small></div><div class="track" title="Extra lookup, old grader: 43 of 62 tasks"><div class="fill old" style="width:69.4%"></div></div><div class="val">43 / 62</div></div><div class="row"><div class="name">Extra lookup<small>fixed grader</small></div><div class="track" title="Extra lookup, fixed grader: 0 of 62 tasks"><div class="fill new" style="width:0.0%"></div></div><div class="val">0 / 62</div></div><div class="row"><div class="name">Number respelled<small>old grader</small></div><div class="track" title="Number respelled, old grader: 25 of 33 tasks"><div class="fill old" style="width:75.8%"></div></div><div class="val">25 / 33</div></div><div class="row"><div class="name">Number respelled<small>fixed grader</small></div><div class="track" title="Number respelled, fixed grader: 0 of 33 tasks"><div class="fill new" style="width:0.0%"></div></div><div class="val">0 / 33</div></div></div>
         </div>
         <div class="chart">
+          <h3>Phase 2: training on the buggy grader</h3>
+          <p class="cap">True success of each of the 10 training runs per grader, and how many learned the task</p>
+          <div class="bars"><div class="row"><div class="name">Old grader</div><div class="runs old"><i style="height:100%" title="Run 0, old grader: 1.00"></i><i style="height:99%" title="Run 1, old grader: 0.99"></i><i style="height:100%" title="Run 2, old grader: 1.00"></i><i style="height:99%" title="Run 3, old grader: 0.99"></i><i style="height:99%" title="Run 4, old grader: 0.99"></i><i style="height:19%" title="Run 5, old grader: 0.19"></i><i style="height:100%" title="Run 6, old grader: 1.00"></i><i style="height:20%" title="Run 7, old grader: 0.20"></i><i style="height:47%" title="Run 8, old grader: 0.47"></i><i style="height:100%" title="Run 9, old grader: 1.00"></i></div><div class="val">7 / 10</div></div><div class="row"><div class="name">Fixed grader</div><div class="runs new"><i style="height:100%" title="Run 0, fixed grader: 1.00"></i><i style="height:100%" title="Run 1, fixed grader: 1.00"></i><i style="height:100%" title="Run 2, fixed grader: 1.00"></i><i style="height:100%" title="Run 3, fixed grader: 1.00"></i><i style="height:100%" title="Run 4, fixed grader: 1.00"></i><i style="height:100%" title="Run 5, fixed grader: 1.00"></i><i style="height:100%" title="Run 6, fixed grader: 1.00"></i><i style="height:100%" title="Run 7, fixed grader: 1.00"></i><i style="height:99%" title="Run 8, fixed grader: 0.99"></i><i style="height:100%" title="Run 9, fixed grader: 1.00"></i></div><div class="val">10 / 10</div></div></div>
+          <p class="small muted" style="margin-top:0.8rem">3 runs on the old grader collapsed, so mean true success fell 21 points. Exploratory, because both pre-registered hypotheses for this phase failed.</p>
+        </div>
+        <div class="chart wide-row">
           <h3>Phase 3: real runs the old grader would misgrade</h3>
           <p class="cap">Share of the 118 wrongly failed runs that phase 1's flags explain</p>
-          <div class="split" role="img" aria-label="87 of 118 explained; the pre-registered target was 90%"><i style="width:74%;background:var(--series-1)" title="87 explained"></i><i style="background:var(--series-2)" title="31 not explained"></i><span class="target" title="pre-registered target: 90%"></span></div>
+          <div class="split" role="img" aria-label="87 of 118 explained, against a pre-registered target of 90%"><i style="width:74%;background:var(--series-1)" title="87 explained"></i><i style="background:var(--series-2)" title="31 not explained"></i><span class="target" title="pre-registered target: 90%"></span></div>
           <div class="legend"><span><i style="background:var(--series-1)"></i>87 explained (74%)</span><span><i style="background:var(--series-2)"></i>31 missed, one bug on 6 tasks</span><span><i style="background:var(--ink);border-radius:1px;width:3px"></i>target 90%</span></div>
-          <p class="small muted" style="margin-top:0.8rem">The runs were made on the fixed grader; these are the verdicts the old grader would have given them. All 31 misses are the same extra-lookup bug, on tasks where phase 1's five sampled lookups never used the tool these agents used.</p>
+          <p class="small muted" style="margin-top:0.8rem">The runs were made on the fixed grader, so these are the verdicts the old grader would have given them. All 31 misses are the same extra-lookup bug, on tasks where phase 1's five sampled lookups never used the tool these agents used.</p>
         </div>
       </div>
       <div class="cards">
-        <div class="card"><span class="origin theirs">Bugs published by Sierra</span><h3>1 · It finds known grading bugs</h3><p>On the grader before the fix, an extra lookup was wrongly failed on <b>43 of 62</b> comparable banking tasks and a respelled number on <b>25 of 33</b>; on the fixed grader, on <b>0</b> and <b>0</b>. Controls in the unchanged domains: 0 mismatches.</p></div>
-        <div class="card"><span class="origin ours">Found here</span><h3>2 · A grader bug changes what is learned</h3><p>Policies trained on the buggy grader learned to stop right after the task; on the fixed one they kept checking. 7 of 10 buggy-grader seeds converged against 10 of 10, so mean true success fell 21 points. This is exploratory: both pre-registered hypotheses for this phase failed.</p></div>
+        <div class="card"><span class="origin theirs">Bugs published by Sierra</span><h3>1 · It finds known grading bugs</h3><p>On the grader before the fix, an extra lookup was wrongly failed on <b>43 of 62</b> comparable banking tasks and a respelled number on <b>25 of 33</b>. The fixed grader wrongly failed <b>0</b> and <b>0</b>. Controls in the unchanged domains: 0 mismatches.</p></div>
+        <div class="card"><span class="origin ours">Found here</span><h3>2 · A grader bug changes what is learned</h3><p>Policies trained on the buggy grader learned to stop right after the task, while those on the fixed one kept checking. 7 of 10 buggy-grader seeds converged against 10 of 10, so mean true success fell 21 points. This is exploratory: both pre-registered hypotheses for this phase failed.</p></div>
         <div class="card"><span class="origin ours">Found here</span><h3>3 · Real frontier-agent runs</h3><p>On 4 public leaderboard files the old grader would wrongly fail <b>118</b> runs (counterfactual: they ran on the fixed version). Phase 1's flags cover 87 (74%), short of the pre-registered 90%, so H5 failed: all 31 misses are the same bug, on 6 tasks where none of phase 1's five sampled extra reads used the tool these agents read.</p></div>
-        <div class="card"><span class="origin ours">Measured here</span><h3>4 · A blind spot in the fixed grader</h3><p>Interest-discrepancy reports go to a table τ²-bench never declares (documented by Inspect Evals in June 2026), so the grader sees that the report tool was used, never what the reports say or how many were filed. It affects 5 banking tasks; 3 of 41 real full-score runs on them filed wrong numbers.</p></div>
+        <div class="card"><span class="origin ours">Measured here</span><h3>4 · A blind spot in the fixed grader</h3><p>Interest-discrepancy reports go to a table τ²-bench never declares (documented by Inspect Evals in June 2026), so the grader sees that the report tool was used, never what the reports say or how many were filed. It affects 5 banking tasks, and 3 of 41 real full-score runs on them filed wrong numbers.</p></div>
       </div>
     </div>
   </section>
@@ -287,7 +299,7 @@ footer a { color: var(--muted); }
       <div class="col stack" style="margin-inline:0">
         <div class="eyebrow">The blind spot</div>
         <h2>A report with wrong numbers still scores full marks</h2>
-        <p class="lead">In task 096 the customer's savings interest was underpaid. The agent should credit both accounts and file a discrepancy report for each, with the correct and the applied interest rate. The report tool answers "Submitted Successfully", but it writes to a database table that doesn't exist, and the helper that writes silently returns instead of failing. The report is lost. The missing table was documented in June 2026 by the Inspect Evals port of τ²-bench, which adds it and notes that scoring is unaffected; in τ²-bench's own grader it is not. The grader only sees, through a call log, that the report tool was used: filing one of the two reports, or reports with wrong rates, still scores full marks.</p>
+        <p class="lead">In task 096 the customer's savings interest was underpaid. The agent should credit both accounts and file a discrepancy report for each, with the correct and the applied interest rate. The report tool answers "Submitted Successfully", but it writes to a database table that doesn't exist, and the helper that writes silently returns instead of failing. The report is lost. The missing table was documented in June 2026 by the Inspect Evals port of τ²-bench, which adds it and notes that scoring is unaffected. In τ²-bench's own grader, scoring is affected. The grader only sees, through a call log, that the report tool was used: filing one of the two reports, or reports with wrong rates, still scores full marks.</p>
       </div>
       <div class="stack" style="gap:1.4rem">
         <div class="stack" style="gap:0.6rem">
@@ -297,17 +309,17 @@ gold run:                          reward 1.0
 same run, wrong report numbers:    reward 1.0  (DB tables that differ from gold: none)
 same run, second report left out:  reward 1.0
 same run, both reports left out:   reward 0.0</code></pre>
-          <p class="small muted">Uses only the task's own correct run, no published data or model. Same result on the grader before and after v1.0.1. The tool and the missing table are unchanged in the newest release, v2.0.0 (by reading its source; not run).</p>
+          <p class="small muted">Uses only the task's own correct run, no published data or model. Same result on the grader before and after v1.0.1. The tool and the missing table are unchanged in the newest release, v2.0.0 (checked by reading its source, not by running it).</p>
         </div>
         <div class="stack" style="gap:0.6rem">
           <h3>Real agents hit it</h3>
           <div class="tablewrap">
             <table>
               <thead><tr><th>Agent</th><th>Task</th><th>Trial</th><th class="num">Reports: gold → filed</th><th>Values filed wrongly</th></tr></thead>
-              <tbody><tr><td>GPT-5.5</td><td>093</td><td>1</td><td class="num">1 → 1</td><td>expected APY 4.25 (correct 4.275)</td></tr><tr><td>Claude Opus 5</td><td>096</td><td>3</td><td class="num">2 → 4</td><td>expected APY 3 (correct 3.25); expected APY 6.8 (correct 6.85)</td></tr><tr><td>Qwen3.8-max</td><td>096</td><td>0</td><td class="num">2 → 2</td><td>actual APY 2.4 (correct 2.55); expected APY 6.9 (correct 6.85)</td></tr></tbody>
+              <tbody><tr><td>GPT-5.5</td><td>093</td><td>1</td><td class="num">1 → 1</td><td>expected APY 4.25 (correct 4.275)</td></tr><tr><td>Claude Opus 5</td><td>096</td><td>3</td><td class="num">2 → 4</td><td>expected APY 3 (correct 3.25), expected APY 6.8 (correct 6.85)</td></tr><tr><td>Qwen3.8-max</td><td>096</td><td>0</td><td class="num">2 → 2</td><td>actual APY 2.4 (correct 2.55), expected APY 6.9 (correct 6.85)</td></tr></tbody>
             </table>
           </div>
-          <p class="small muted">All 41 held-out runs that scored 1 on the 5 affected tasks, checked against the gold reports and against the rates the task's own rules give (base rate plus the highest checking boost and the highest card bonus; actual rate from the credit and balance); all three scored full marks. Claude Opus 5 filed two wrong reports, then the two correct ones as well.</p>
+          <p class="small muted">All 41 held-out runs that scored 1 on the 5 affected tasks, checked against the gold reports and against the rates the task's own rules give (base rate plus the highest checking boost and the highest card bonus, with the actual rate taken from the credit and balance). All three scored full marks. Claude Opus 5 filed two wrong reports, then the two correct ones as well.</p>
         </div>
       </div>
     </div>
@@ -321,7 +333,7 @@ same run, both reports left out:   reward 0.0</code></pre>
       </div>
       <ul class="list">
         <li>Try every possible extra lookup per task instead of five sampled ones: the one change that would have explained all 118 misgraded runs.</li>
-        <li>Add a check that alters the arguments of writes that leave nothing behind; it would have found the report blind spot from the gold runs alone.</li>
+        <li>Add a check that alters the arguments of writes that leave nothing behind. It would have found the report blind spot from the gold runs alone.</li>
         <li>Report the blind spot to the benchmark's maintainers with the one-command reproduction.</li>
       </ul>
     </div>
@@ -341,18 +353,18 @@ same run, both reports left out:   reward 0.0</code></pre>
       <h2>Architecture</h2>
       <div class="steps">
         <div class="step"><b>Adapter</b><span>Runs tool calls on a live τ²-bench environment and scores them with τ²-bench's own, unchanged grader. Frozen since phase 1.</span></div>
-        <div class="step"><b>Relations</b><span>Six changes to a gold run, each with a known right verdict (P1, P3, P5 should pass; F1, F3, F6 should fail).</span></div>
+        <div class="step"><b>Relations</b><span>Six changes to a gold run, each with a known right verdict. P1, P3 and P5 should pass. F1, F3 and F6 should fail.</span></div>
         <div class="step"><b>Phase 1 suite</b><span>Runs every relation on every task and compares the two grader versions case by case.</span></div>
         <div class="step"><b>Phase 2 learner</b><span>A small policy trained with REINFORCE on real tool calls, rewarded by one grader version.</span></div>
         <div class="step"><b>Phase 3 audit</b><span>Replays published agent runs, regrades them under both versions and checks them against the relations.</span></div>
       </div>
-      <p class="muted">The two grader versions are τ²-bench at <code>pre-v1.0.1</code> (commit <code>b51a6d6</code>) and <code>v1.0.1</code> (<code>fc0055d</code>), each in its own pinned environment built from τ²-bench's lockfile. One process loads one version; results are joined afterwards. Design notes: <a href="https://github.com/yashgix/grader-preflight/blob/main/docs/DESIGN.md">DESIGN.md</a>. Hypotheses, thresholds, seeds and the nine dated amendments: <a href="https://github.com/yashgix/grader-preflight/blob/main/PREREGISTRATION.md">PREREGISTRATION.md</a>.</p>
+      <p class="muted">The two grader versions are τ²-bench at <code>pre-v1.0.1</code> (commit <code>b51a6d6</code>) and <code>v1.0.1</code> (<code>fc0055d</code>), each in its own pinned environment built from τ²-bench's lockfile. One process loads one version, and results are joined afterwards. Design notes: <a href="https://github.com/yashgix/grader-preflight/blob/main/docs/DESIGN.md">DESIGN.md</a>. Hypotheses, thresholds, seeds and the nine dated amendments: <a href="https://github.com/yashgix/grader-preflight/blob/main/PREREGISTRATION.md">PREREGISTRATION.md</a>.</p>
     </div>
   </section>
 
   <section class="block band wrap">
     <div class="wide stack" style="gap:1.2rem">
-      <h2>Phase 1: the known bugs</h2>
+      <h2 id="phase-1">Phase 1: the known bugs</h2>
       <p>Every relation on every banking, airline and retail task, on both versions: 2,203 cases per side, 0 errors, two identical runs. Banking tasks whose data changed between the versions (26) are left out of the comparison.</p>
       <div class="tablewrap">
         <table>
@@ -366,45 +378,45 @@ same run, both reports left out:   reward 0.0</code></pre>
           </tbody>
         </table>
       </div>
-      <p class="small muted">P1 and P3 match Sierra's fixes #329 and #397; every P1 flag differs only in the read-log table #329 is about. The airline and retail controls, unchanged between versions, gave 0 mismatches. H1 held; H2 did not, only because of F1, as amendment 3 predicted before the run.</p>
+      <p class="small muted">P1 and P3 match Sierra's fixes #329 and #397. Every P1 flag differs only in the read-log table #329 is about. The airline and retail controls, unchanged between versions, gave 0 mismatches. H1 held. H2 did not, only because of F1, as amendment 3 predicted before the run.</p>
     </div>
   </section>
 
   <section class="block wrap">
     <div class="wide stack" style="gap:1.2rem">
-      <h2>Phase 2: does the bug change what is learned?</h2>
-      <p>A linear softmax policy over candidate tool calls, trained with REINFORCE on 30 banking training tasks (10 more held out), 10 seeds per grader, 3,000 episodes each. Every call is a real τ²-bench call graded by the real grader; true success is judged separately by the fixed grader plus an order check. The gate (the policy learns at all) held at 0.997.</p>
+      <h2 id="phase-2">Phase 2: does the bug change what is learned?</h2>
+      <p>A linear softmax policy over candidate tool calls, trained with REINFORCE on 30 banking training tasks (10 more held out), 10 seeds per grader, 3,000 episodes each. Every call is a real τ²-bench call graded by the real grader. True success is judged separately by the fixed grader plus an order check. The gate (the policy learns at all) held at 0.997.</p>
       <div class="legend"><span><i style="background:var(--series-2)"></i>old grader</span><span><i style="background:var(--series-1)"></i>fixed grader</span></div>
       <svg class="chart" viewBox="0 0 640 250" role="img" aria-label="True success per seed, old grader versus fixed grader"><line class="grid" x1="44" x2="632" y1="214.0" y2="214.0"/><text class="tick" x="36" y="218.0" text-anchor="end">0</text><line class="grid" x1="44" x2="632" y1="122.0" y2="122.0"/><text class="tick" x="36" y="126.0" text-anchor="end">0.5</text><line class="grid" x1="44" x2="632" y1="30.0" y2="30.0"/><text class="tick" x="36" y="34.0" text-anchor="end">1</text><line class="threshold" x1="44" x2="632" y1="66.8" y2="66.8"/><text class="tick" x="630" y="60.8" text-anchor="end">converged above 0.8</text><text class="tick" x="73.0" y="236" text-anchor="middle">0</text><circle cx="67.0" cy="30.0" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 0, old grader: 1.00</title></circle><circle cx="79.0" cy="30.0" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 0, fixed grader: 1.00</title></circle><text class="tick" x="131.0" y="236" text-anchor="middle">1</text><circle cx="125.0" cy="31.2" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 1, old grader: 0.99</title></circle><circle cx="137.0" cy="30.6" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 1, fixed grader: 1.00</title></circle><text class="tick" x="189.0" y="236" text-anchor="middle">2</text><circle cx="183.0" cy="30.6" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 2, old grader: 1.00</title></circle><circle cx="195.0" cy="30.0" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 2, fixed grader: 1.00</title></circle><text class="tick" x="247.0" y="236" text-anchor="middle">3</text><circle cx="241.0" cy="31.8" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 3, old grader: 0.99</title></circle><circle cx="253.0" cy="30.0" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 3, fixed grader: 1.00</title></circle><text class="tick" x="305.0" y="236" text-anchor="middle">4</text><circle cx="299.0" cy="31.2" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 4, old grader: 0.99</title></circle><circle cx="311.0" cy="30.6" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 4, fixed grader: 1.00</title></circle><text class="tick" x="363.0" y="236" text-anchor="middle">5</text><circle cx="357.0" cy="178.4" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 5, old grader: 0.19</title></circle><circle cx="369.0" cy="30.6" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 5, fixed grader: 1.00</title></circle><text class="tick" x="421.0" y="236" text-anchor="middle">6</text><circle cx="415.0" cy="30.6" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 6, old grader: 1.00</title></circle><circle cx="427.0" cy="30.0" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 6, fixed grader: 1.00</title></circle><text class="tick" x="479.0" y="236" text-anchor="middle">7</text><circle cx="473.0" cy="177.8" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 7, old grader: 0.20</title></circle><circle cx="485.0" cy="30.6" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 7, fixed grader: 1.00</title></circle><text class="tick" x="537.0" y="236" text-anchor="middle">8</text><circle cx="531.0" cy="127.5" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 8, old grader: 0.47</title></circle><circle cx="543.0" cy="31.2" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 8, fixed grader: 0.99</title></circle><text class="tick" x="595.0" y="236" text-anchor="middle">9</text><circle cx="589.0" cy="30.0" r="5.5" fill="var(--series-2)" class="dot"><title>Seed 9, old grader: 1.00</title></circle><circle cx="601.0" cy="30.6" r="5.5" fill="var(--series-1)" class="dot"><title>Seed 9, fixed grader: 1.00</title></circle><text class="tick" x="342" y="249" text-anchor="middle">seed</text></svg>
       <div class="tablewrap">
         <table>
           <thead><tr><th>Pre-registered</th><th>Result</th></tr></thead>
           <tbody>
-            <tr><td>H3: RL finds nothing phase 1 missed</td><td><b>Not held.</b> 280 distinct full-reward runs a stricter check marks wrong, 64% in a class phase 1 flagged; the rest are wrong-ID writes that fail or are overwritten, invisible to a final-state grader.</td></tr>
+            <tr><td>H3: RL finds nothing phase 1 missed</td><td><b>Not held.</b> 280 distinct full-reward runs a stricter check marks wrong, 64% in a class phase 1 flagged. The rest are wrong-ID writes that fail or are overwritten, invisible to a final-state grader.</td></tr>
             <tr><td>H4: the old grader suppresses lookups at no cost</td><td><b>Not held.</b> Extra lookups, old minus fixed: −1.34 [−2.51, 0.24] (interval crosses 0). True success: −0.215 [−0.428, −0.004].</td></tr>
             <tr><td>Exploratory (amendment 6)</td><td>Greedy policies: lookups after the task is done, old minus fixed, −1.80 [−2.73, −0.84].</td></tr>
           </tbody>
         </table>
       </div>
-      <p class="small muted">Means over seeds with 95% bootstrap intervals; every seed reported, converged or not. The policy sees only which calls it has made, not tool outputs, so this is a controlled experiment on the reward, not a model of LLM agents.</p>
+      <p class="small muted">Means over seeds with 95% bootstrap intervals. Every seed is reported, converged or not. The policy sees only which calls it has made, not tool outputs, so this is a controlled experiment on the reward, not a model of LLM agents.</p>
     </div>
   </section>
 
   <section class="block band wrap">
     <div class="wide stack" style="gap:1.2rem">
-      <h2>Phase 3: published frontier-agent runs</h2>
-      <p>Six public leaderboard trajectory files, chosen by a rule fixed before download: four banking (GPT-5.5, Claude Opus 4.7, Qwen3.8-max, Claude Opus 5; 388 runs each) and two airline (400 runs). Each run is replayed in both pinned environments and regraded. All four banking files turned out to have been produced on v1.0.1 itself, so the old grader's verdicts are <b>counterfactual</b>: what it would have said about these runs. Our regrade on v1.0.1 equals the leaderboard's recorded reward on 350–352 of 352 graded runs per file.</p>
+      <h2 id="phase-3">Phase 3: published frontier-agent runs</h2>
+      <p>Six public leaderboard trajectory files, chosen by a rule fixed before download: four banking (GPT-5.5, Claude Opus 4.7, Qwen3.8-max and Claude Opus 5, 388 runs each) and two airline (400 runs). Each run is replayed in both pinned environments and regraded. All four banking files turned out to have been produced on v1.0.1 itself, so the old grader's verdicts are <b>counterfactual</b>: what it would have said about these runs. Our regrade on v1.0.1 equals the leaderboard's recorded reward on 350–352 of 352 graded runs per file.</p>
       <div class="legend"><span><i style="background:var(--series-1)"></i>explained by phase 1's flags</span><span><i style="background:var(--series-2)"></i>not explained</span></div>
       <svg class="chart" viewBox="0 0 640 434" role="img" aria-label="Grading errors per task: explained by phase 1 versus not"><text class="tick" x="66" y="20" text-anchor="end">task 064</text><rect x="74" y="10" width="524.0" height="12" rx="3" fill="var(--series-1)"><title>task_064: 16 explained</title></rect><text class="value" x="606.0" y="20">16</text><text class="tick" x="66" y="39" text-anchor="end">task 037</text><rect x="74" y="29" width="458.2" height="12" rx="3" fill="var(--series-1)"><title>task_037: 14 explained</title></rect><text class="value" x="540.2" y="39">14</text><text class="tick" x="66" y="58" text-anchor="end">task 058</text><rect x="74" y="48" width="458.2" height="12" rx="3" fill="var(--series-1)"><title>task_058: 14 explained</title></rect><text class="value" x="540.2" y="58">14</text><text class="tick" x="66" y="77" text-anchor="end">task 076</text><rect x="74.0" y="67" width="425.4" height="12" rx="3" fill="var(--series-2)"><title>task_076: 13 not explained</title></rect><text class="value" x="507.4" y="77">13</text><text class="tick" x="66" y="96" text-anchor="end">task 098</text><rect x="74" y="86" width="359.6" height="12" rx="3" fill="var(--series-1)"><title>task_098: 11 explained</title></rect><text class="value" x="441.6" y="96">11</text><text class="tick" x="66" y="115" text-anchor="end">task 049</text><rect x="74.0" y="105" width="228.1" height="12" rx="3" fill="var(--series-2)"><title>task_049: 7 not explained</title></rect><text class="value" x="310.1" y="115">7</text><text class="tick" x="66" y="134" text-anchor="end">task 036</text><rect x="74" y="124" width="195.2" height="12" rx="3" fill="var(--series-1)"><title>task_036: 6 explained</title></rect><text class="value" x="277.2" y="134">6</text><text class="tick" x="66" y="153" text-anchor="end">task 075</text><rect x="74.0" y="143" width="162.4" height="12" rx="3" fill="var(--series-2)"><title>task_075: 5 not explained</title></rect><text class="value" x="244.4" y="153">5</text><text class="tick" x="66" y="172" text-anchor="end">task 017</text><rect x="74.0" y="162" width="129.5" height="12" rx="3" fill="var(--series-2)"><title>task_017: 4 not explained</title></rect><text class="value" x="211.5" y="172">4</text><text class="tick" x="66" y="191" text-anchor="end">task 028</text><rect x="74" y="181" width="129.5" height="12" rx="3" fill="var(--series-1)"><title>task_028: 4 explained</title></rect><text class="value" x="211.5" y="191">4</text><text class="tick" x="66" y="210" text-anchor="end">task 047</text><rect x="74" y="200" width="129.5" height="12" rx="3" fill="var(--series-1)"><title>task_047: 4 explained</title></rect><text class="value" x="211.5" y="210">4</text><text class="tick" x="66" y="229" text-anchor="end">task 038</text><rect x="74" y="219" width="96.6" height="12" rx="3" fill="var(--series-1)"><title>task_038: 3 explained</title></rect><text class="value" x="178.6" y="229">3</text><text class="tick" x="66" y="248" text-anchor="end">task 063</text><rect x="74" y="238" width="96.6" height="12" rx="3" fill="var(--series-1)"><title>task_063: 3 explained</title></rect><text class="value" x="178.6" y="248">3</text><text class="tick" x="66" y="267" text-anchor="end">task 101</text><rect x="74" y="257" width="96.6" height="12" rx="3" fill="var(--series-1)"><title>task_101: 3 explained</title></rect><text class="value" x="178.6" y="267">3</text><text class="tick" x="66" y="286" text-anchor="end">task 022</text><rect x="74" y="276" width="63.8" height="12" rx="3" fill="var(--series-1)"><title>task_022: 2 explained</title></rect><text class="value" x="145.8" y="286">2</text><text class="tick" x="66" y="305" text-anchor="end">task 046</text><rect x="74" y="295" width="63.8" height="12" rx="3" fill="var(--series-1)"><title>task_046: 2 explained</title></rect><text class="value" x="145.8" y="305">2</text><text class="tick" x="66" y="324" text-anchor="end">task 102</text><rect x="74" y="314" width="63.8" height="12" rx="3" fill="var(--series-1)"><title>task_102: 2 explained</title></rect><text class="value" x="145.8" y="324">2</text><text class="tick" x="66" y="343" text-anchor="end">task 005</text><rect x="74" y="333" width="30.9" height="12" rx="3" fill="var(--series-1)"><title>task_005: 1 explained</title></rect><text class="value" x="112.9" y="343">1</text><text class="tick" x="66" y="362" text-anchor="end">task 018</text><rect x="74.0" y="352" width="30.9" height="12" rx="3" fill="var(--series-2)"><title>task_018: 1 not explained</title></rect><text class="value" x="112.9" y="362">1</text><text class="tick" x="66" y="381" text-anchor="end">task 019</text><rect x="74.0" y="371" width="30.9" height="12" rx="3" fill="var(--series-2)"><title>task_019: 1 not explained</title></rect><text class="value" x="112.9" y="381">1</text><text class="tick" x="66" y="400" text-anchor="end">task 021</text><rect x="74" y="390" width="30.9" height="12" rx="3" fill="var(--series-1)"><title>task_021: 1 explained</title></rect><text class="value" x="112.9" y="400">1</text><text class="tick" x="66" y="419" text-anchor="end">task 052</text><rect x="74" y="409" width="30.9" height="12" rx="3" fill="var(--series-1)"><title>task_052: 1 explained</title></rect><text class="value" x="112.9" y="419">1</text></svg>
       <div class="tablewrap">
         <table>
           <thead><tr><th>Measure</th><th>Result</th></tr></thead>
           <tbody>
-            <tr><td>H5: phase 1 explains the old grader's real errors</td><td><b>Not held.</b> 118 of 899 comparable runs misgraded (all false failures), across 22 tasks; 87 explained, recall 0.74 [0.48, 0.94] (task-clustered bootstrap). Needed ≥ 0.90.</td></tr>
-            <tr><td>The 31 misses</td><td>All have the extra-read trigger and the #329 table difference, on tasks 017, 018, 019, 049, 075, 076, where none of phase 1's five sampled extra reads per task used the tool these agents read. The trigger itself is present in every misgraded run (it fires in 254 runs; in the other 136 the two versions agree); the task-level flag alone is a weak predictor (enrichment 0.60).</td></tr>
-            <tr><td>Number respelling in real runs</td><td>36 runs respell a number; 0 misgradings. Airline: 0 whole-number floats in 400 runs.</td></tr>
-            <tr><td>Verification order (fixed grader)</td><td>634 full-score runs: 0 log verification after a change; 7 show automated evidence of reading records before two identity facts (evidence, not violations).</td></tr>
-            <tr><td>Old-code replay</td><td>22%–30% of comparable banking runs per file cannot be replayed on the old code (a state-changing tool's output changed), above the pre-registered 20% line; H5 covers the rest.</td></tr>
+            <tr><td>H5: phase 1 explains the old grader's real errors</td><td><b>Not held.</b> 118 of 899 comparable runs misgraded (all false failures), across 22 tasks. Of these, 87 are explained, recall 0.74 [0.48, 0.94] (task-clustered bootstrap). Needed ≥ 0.90.</td></tr>
+            <tr><td>The 31 misses</td><td>All have the extra-read trigger and the #329 table difference, on tasks 017, 018, 019, 049, 075, 076, where none of phase 1's five sampled extra reads per task used the tool these agents read. The trigger itself is present in every misgraded run. It fires in 254 runs, and in the other 136 the two versions agree. The task-level flag alone is a weak predictor (enrichment 0.60).</td></tr>
+            <tr><td>Number respelling in real runs</td><td>36 runs respell a number, with 0 misgradings. Airline: 0 whole-number floats in 400 runs.</td></tr>
+            <tr><td>Verification order (fixed grader)</td><td>634 full-score runs: 0 log verification after a change, and 7 show automated evidence of reading records before two identity facts (evidence, not violations).</td></tr>
+            <tr><td>Old-code replay</td><td>22%–30% of comparable banking runs per file cannot be replayed on the old code (a state-changing tool's output changed), above the pre-registered 20% line. H5 covers the rest.</td></tr>
           </tbody>
         </table>
       </div>
@@ -415,13 +427,13 @@ same run, both reports left out:   reward 0.0</code></pre>
 
   <section class="block wrap">
     <div class="wide stack" style="gap:1.2rem">
-      <h2>The report blind spot</h2>
+      <h2 id="blind-spot">The report blind spot</h2>
       <ul class="list">
-        <li><code>submit_interest_discrepancy_report_7294</code> calls <code>add_to_db("interest_discrepancy_reports", …)</code>; the banking database model defines no such table, and <code>add_to_db</code> returns <code>False</code> for an unknown table. The tool ignores that and returns success. It is the only tool in the domain that writes to an undefined table.</li>
-        <li>The grader compares database hashes, so the report's contents never reach it; the discoverable-tool call log records the tool name, which is why leaving the report out fails.</li>
+        <li><code>submit_interest_discrepancy_report_7294</code> calls <code>add_to_db("interest_discrepancy_reports", …)</code>. The banking database model defines no such table, and <code>add_to_db</code> returns <code>False</code> for an unknown table. The tool ignores that and returns success. It is the only tool in the domain that writes to an undefined table.</li>
+        <li>The grader compares database hashes, so the report's contents never reach it. The discoverable-tool call log records the tool name, which is why leaving the report out fails.</li>
         <li>Scope: tasks 093, 094, 095, 096, 097 file reports in their gold runs. In the held-out runs, 3 of 41 full-score runs on them filed reports whose numbers differ from gold.</li>
-        <li>Every wrong value in the table is wrong under the task's written rules, independently of the gold run; task 096's Bluest account is below its stated minimum balance, an ambiguity in the task, but none of the flagged values matches either reading.</li>
-        <li>Filing only one of task 096's two reports, or one of task 097's four, also scores full marks: the call log records the tool name once. Phase 1 counted the repeated report calls in tasks 096 and 097 as "no-effect writes" but had no relation that varied their arguments. The missing table itself was documented in June 2026 by the <a href="https://github.com/UKGovernmentBEIS/inspect_evals/pull/1731">Inspect Evals port</a>, which declares it and notes scoring is unaffected in that port; τ²-bench's own issues and changelog don't mention it (searched 11 Nov 2026), and issue #753 documents related call-log behaviour.</li>
+        <li>Every wrong value in the table is wrong under the task's written rules, independently of the gold run. Task 096's Bluest account is below its stated minimum balance, an ambiguity in the task, but none of the flagged values matches either reading.</li>
+        <li>Filing only one of task 096's two reports, or one of task 097's four, also scores full marks: the call log records the tool name once. Phase 1 counted the repeated report calls in tasks 096 and 097 as "no-effect writes" but had no relation that varied their arguments. The missing table itself was documented in June 2026 by the <a href="https://github.com/UKGovernmentBEIS/inspect_evals/pull/1731">Inspect Evals port</a>, which declares it and notes scoring is unaffected in that port. τ²-bench's own issues and changelog don't mention it (searched 11 Nov 2026), and issue #753 documents related call-log behaviour.</li>
       </ul>
     </div>
   </section>
@@ -430,12 +442,12 @@ same run, both reports left out:   reward 0.0</code></pre>
     <div class="wide stack" style="gap:1.2rem">
       <h2>Limits and threats to validity</h2>
       <ul class="list">
-        <li>Phase 3's old-grader verdicts are counterfactual; no agent here faced the old grader. 22%–30% of old-code replays are incompatible.</li>
-        <li>Four high-scoring agents and one domain; results describe their runs, not agents in general. Only the 1.x leaderboard version is tested; v2.0.0 is examined by code reading only.</li>
+        <li>Phase 3's old-grader verdicts are counterfactual. No agent here faced the old grader. 22%–30% of old-code replays are incompatible.</li>
+        <li>Four high-scoring agents and one domain, so results describe their runs, not agents in general. Only the 1.x leaderboard version is tested, and v2.0.0 is examined by code reading only.</li>
         <li>Offline replay uses a text-search retrieval in place of the runs' embedding search. Searches are reads, so grading is unaffected, but replayed search outputs differ.</li>
-        <li>Phase 2's policy is open-loop and its true-success check is ours; it shows how a reward flaw shapes learning, not how a language model would behave.</li>
-        <li>Annotation is model-assisted and small (24 runs); the codebook was revised after a first pass, and the adjudicator is from the same model family as one annotator. The blind-spot evidence does not depend on it.</li>
-        <li>Two amendments (8, 9) were written after results were seen; both are dated and say what changed. No hypothesis, threshold or sample was changed after its data was seen.</li>
+        <li>Phase 2's policy is open-loop and its true-success check is ours. It shows how a reward flaw shapes learning, not how a language model would behave.</li>
+        <li>Annotation is model-assisted and small (24 runs). The codebook was revised after a first pass, and the adjudicator is from the same model family as one annotator. The blind-spot evidence does not depend on it.</li>
+        <li>Two amendments (8, 9) were written after results were seen. Both are dated and say what changed. No hypothesis, threshold or sample was changed after its data was seen.</li>
       </ul>
     </div>
   </section>
@@ -464,7 +476,7 @@ same run, both reports left out:   reward 0.0</code></pre>
 .tau2/v1.0.1/venv/bin/python examples/report_blind_spot.py
 .tau2/pre-v1.0.1/venv/bin/python experiment.py --phase 1 --out runs/phase1/metrics.json
 .tau2/pre-v1.0.1/venv/bin/python experiment.py --phase 3 --out runs/phase3/metrics.json</code></pre>
-      <p class="small muted">Phase 2's full sweep (<code>experiment.py --full</code>) takes about 1.5 hours on 8 cores. Phase 3 on published data needs the leaderboard files, downloaded separately; they are not redistributed here because their licence is not stated (τ²-bench issue #612). Commands in the README.</p>
+      <p class="small muted">Phase 2's full sweep (<code>experiment.py --full</code>) takes about 1.5 hours on 8 cores. Phase 3 on published data needs the leaderboard files, downloaded separately. They are not redistributed here because their licence is not stated (τ²-bench issue #612). Commands in the README.</p>
     </div>
   </section>
 </main>
@@ -472,26 +484,41 @@ same run, both reports left out:   reward 0.0</code></pre>
 <footer class="wrap">
   <div class="wide">
     <span>Yash Gupta · <a href="https://github.com/yashgix">GitHub</a> · <a href="https://www.linkedin.com/in/yash-guptaix">LinkedIn</a></span>
-    <span>An independent project, not affiliated with Sierra. τ²-bench is MIT-licensed; published leaderboard runs are used for aggregate analysis only.</span>
+    <span>An independent project, not affiliated with Sierra. τ²-bench is MIT-licensed, and published leaderboard runs are used for aggregate analysis only.</span>
   </div>
 </footer>
 
 <script>
 (function () {
   var views = ["overview", "details"];
-  function show(view, scroll) {
+  function show(view) {
     views.forEach(function (v) {
       document.getElementById(v).hidden = v !== view;
       document.getElementById("tab-" + v).setAttribute("aria-selected", String(v === view));
     });
-    if (scroll) window.scrollTo({ top: 0 });
-    if (location.hash !== "#" + view) history.replaceState(null, "", view === "overview" ? location.pathname : "#details");
+  }
+  // A hash naming the details tab or a section inside it opens that tab; anything else shows the overview.
+  function route(scroll) {
+    var target = location.hash && document.getElementById(location.hash.slice(1));
+    var inDetails = Boolean(target && target.closest("#details"));
+    show(inDetails ? "details" : "overview");
+    if (inDetails && target.id !== "details") target.scrollIntoView({ behavior: "instant" });
+    else if (scroll) window.scrollTo({ top: 0 });
   }
   document.querySelectorAll("[data-view]").forEach(function (el) {
-    el.addEventListener("click", function () { show(el.getAttribute("data-view"), true); });
+    el.addEventListener("click", function () {
+      if (el.getAttribute("data-view") === "details") {
+        if (location.hash === "#details") route(true); else location.hash = "details";
+      } else {
+        history.replaceState(null, "", location.pathname);
+        route(true);
+      }
+    });
   });
-  window.addEventListener("hashchange", function () { show(location.hash === "#details" ? "details" : "overview", true); });
-  show(location.hash === "#details" ? "details" : "overview", false);
+  window.addEventListener("hashchange", function () { route(true); });
+  route(false);
+  // Fonts can shift the layout after the first scroll, so scroll to a linked section again once loaded.
+  window.addEventListener("load", function () { route(false); });
 })();
 </script>
 </body>
